@@ -1,0 +1,631 @@
+# moons v1
+main.moon: |
+    moon: "1.0"
+    doc: |
+        Xiaomi-style tower air purifier (real device: 25 x 25 x 56 cm).
+        White rounded-square shell whose lower intake band is perforated with
+        real through-holes (staggered hex grid, fading out toward the top),
+        revealing a dark cylindrical HEPA filter inside. Smooth upper shell with
+        a circular front display (silver bezel), dark plinth, and a hollow white
+        top well with a visible 9-blade fan under the recessed radial grille.
+        Back: flush sensor door with engraved seam and two vent-slot clusters,
+        engraved same-color brightness button with LED through-hole, and a
+        recessed grip pocket at the top of the perforated filter door.
+        Fully parametric in width and height: layout positions scale
+        proportionally while real-world detail sizes (hole diameter and pitch,
+        wall thicknesses, sensor door, display, pocket) stay fixed, and the
+        hole grid regenerates so holes remain round at any size.
+    params:
+        width:
+            default: 0.25
+            doc: |
+                Footprint width / depth in meters.
+            min: 0.15
+            max: 0.4
+        height:
+            default: 0.56
+            doc: |
+                Total height from floor to top in meters.
+            min: 0.3
+            max: 0.9
+    assets:
+        profile:
+            op: Rect
+            with:
+                size:
+                    expression: |
+                        [params.width, params.width]
+                cornerRadius:
+                    expression: |
+                        [0.22 * params.width, 0.22 * params.width]
+        innerRect:
+            op: Rect
+            with:
+                size:
+                    expression: |
+                        [params.width - 0.018, params.width - 0.018]
+                cornerRadius:
+                    expression: |
+                        [0.2 * params.width, 0.2 * params.width]
+        white:
+            op: Material
+            with:
+                color: [0.95, 0.95, 0.96, 1]
+                roughness: 0.45
+        lightGray:
+            op: Material
+            with:
+                color: [0.84, 0.86, 0.88, 1]
+                roughness: 0.6
+        midGray:
+            op: Material
+            with:
+                color: [0.58, 0.6, 0.62, 1]
+                roughness: 0.65
+        dark:
+            op: Material
+            with:
+                color: [0.13, 0.14, 0.15, 1]
+                roughness: 0.8
+        screenBlack:
+            op: Material
+            with:
+                color: [0.02, 0.02, 0.03, 1]
+                roughness: 0.15
+        silver:
+            op: Material
+            with:
+                color: [0.85, 0.86, 0.88, 1]
+                roughness: 0.25
+                metallic: 1
+        filterTexture:
+            doc: |
+                Fine dot pattern of the filter's perforated outer wrap: slightly
+                darker holes on dark gray, tiled around the cylinder.
+            expression: |
+                const n = 128
+                const cell = 16
+                const [x, y] = Coords({ shape: [n, n] })
+                const xo = x % cell - cell / 2
+                const yo = y % cell - cell / 2
+                const d2 = xo * xo + yo * yo
+                const mask = Clamp({ input: (30 - d2) * 0.5, min: 0, max: 1 })
+                const v = 0.2 - 0.12 * mask
+                return StackAxis({ input: [v, v, v], axis: 2 })
+            produces: IMAGE
+        filterMaterial:
+            op: Material
+            with:
+                color:
+                    asset: filterTexture
+                textureSizeInMeters: 0.05
+        punchZ:
+            doc: |
+                The hole punch: a staggered grid of thin cylinders running along
+                Z, one row per height step, with radii shrinking to zero toward
+                the top of the intake band. Subtracted from the shell tube to
+                carve real through-holes in front and back walls at once. Hole
+                size and pitch are fixed real-world constants; the grid extents
+                regenerate from width and height.
+            expression: |
+                const W = params.width
+                const H = params.height
+                const pitch = 0.008
+                const holeRadius = 0.0025
+                const rowPitch = pitch * 0.866
+                const xMax = 0.28 * W + 0.022
+                const fadeEnd = 0.696 * H
+                const fadeSpan = 0.17 * H
+                const parts = []
+                let rowIndex = 0
+                for (let y = 0.02; y <= fadeEnd - 0.31 * fadeSpan; y += rowPitch) {
+                    const t = Math.min(1, Math.max(0, (fadeEnd - y) / fadeSpan))
+                    const r = holeRadius * t
+                    if (r >= 0.0008) {
+                        const off = (rowIndex % 2) * pitch / 2
+                        const positions = []
+                        for (let x = -xMax + off; x <= xMax + 0.0001; x += pitch) {
+                            positions.push([x, y, 0])
+                        }
+                        const cyl = Transform({
+                            input: Cylinder({ height: 1.4 * W, radiusLow: r, resolution: 10 }),
+                            rotate: [90, 0, 0]
+                        })
+                        parts.push(Place({ input: cyl, positions }))
+                    }
+                    rowIndex++
+                }
+                return Group(parts)
+            produces: MESHES
+        punchX:
+            op: Transform
+            with:
+                rotate: [0, 90, 0]
+            input:
+                asset: punchZ
+        backCuts:
+            doc: |
+                All rear-wall cuts, subtracted from the upper shell: engraved
+                seam groove around the flush sensor door, engraved ring seam of
+                the brightness button, two clusters of horizontal vent slots
+                (left cluster shallow, right cluster cut through so it reads
+                dark), and the tiny LED through-hole. Darkness comes from real
+                depth, not paint.
+            expression: |
+                const W = params.width
+                const H = params.height
+                const face = W / 2
+                const doorY = 0.816 * H
+                const buttonY = 0.914 * H
+                const parts = []
+                parts.push(Transform({
+                    input: Extrude({
+                        input: Difference([
+                            Rect({ size: [0.0585, 0.0565], cornerRadius: [0.007, 0.007] }),
+                            Rect({ size: [0.0565, 0.0545], cornerRadius: [0.0062, 0.0062] })
+                        ]),
+                        height: 0.0062
+                    }),
+                    rotate: [90, 0, 0],
+                    translate: [0, doorY, -(face + 0.005)]
+                }))
+                parts.push(Transform({
+                    input: Extrude({
+                        input: Difference([
+                            Circle({ radius: 0.0115 }),
+                            Circle({ radius: 0.0102 })
+                        ]),
+                        height: 0.0062
+                    }),
+                    rotate: [90, 0, 0],
+                    translate: [0, buttonY, -(face + 0.005)]
+                }))
+                const throughSize = 0.12 * W + 0.0025
+                const throughCenter = -(0.38 * W + throughSize / 2)
+                for (let i = 0; i < 7; i++) {
+                    const y = doorY - 0.0045 + i * 0.0032
+                    parts.push(Transform({
+                        input: Box({ size: [0.017, 0.0016, 0.0042] }),
+                        translate: [0.0125, y, -(face + 0.0009)]
+                    }))
+                    parts.push(Transform({
+                        input: Box({ size: [0.019, 0.0016, throughSize] }),
+                        translate: [-0.0135, y, throughCenter]
+                    }))
+                }
+                parts.push(Transform({
+                    input: Cylinder({ height: 0.02, radiusLow: 0.0012, resolution: 12 }),
+                    rotate: [90, 0, 0],
+                    translate: [0.021, buttonY, -(face - 0.005)]
+                }))
+                return Group(parts)
+            produces: MESHES
+        pocketCut:
+            doc: |
+                Stadium-shaped prism cutting the grip opening through the rear
+                wall at the top of the perforated filter door.
+            pipe:
+              - op: Rect
+                with:
+                    size: [0.056, 0.02]
+                    cornerRadius: [0.009, 0.009]
+              - op: Extrude
+                with:
+                    height: 0.04
+              - op: Transform
+                with:
+                    rotate: [90, 0, 0]
+                    translate:
+                        expression: |
+                            [0, 0.67 * params.height, -(params.width / 2 + 0.02)]
+        base:
+            pipe:
+              - op: Transform
+                with:
+                    scale: [0.94, 0.94]
+                input:
+                    asset: profile
+              - op: Extrude
+                with:
+                    height: 0.012
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: dark
+        lowerShell:
+            doc: |
+                Thin-walled shell tube for the intake band, perforated with real
+                holes by subtracting the two punch grids, plus the grip-pocket
+                opening.
+            pipe:
+              - op: Difference
+                input:
+                    items:
+                      - pipe:
+                          - op: Difference
+                            input:
+                                items:
+                                  - asset: profile
+                                  - op: Offset
+                                    with:
+                                        delta: -0.0025
+                                    input:
+                                        asset: profile
+                          - op: Extrude
+                            with:
+                                height:
+                                    expression: |
+                                        0.702 * params.height - 0.008
+                          - op: Transform
+                            with:
+                                translate: [0, 0.008, 0]
+                      - asset: punchZ
+                      - asset: punchX
+                      - asset: pocketCut
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: white
+        filter:
+            doc: |
+                Approximation of the real cylindrical HEPA filter, as visible
+                through the intake holes: dark perforated wrap with plastic
+                end-cap rings at bottom and top. Radius follows the shell so the
+                air gap behind the holes stays constant.
+            expression: |
+                const W = params.width
+                const H = params.height
+                const rBody = W / 2 - 0.0125
+                const rCap = W / 2 - 0.0105
+                const topY = 0.643 * H
+                const body = Transform({
+                    input: TileMaterial({
+                        input: ApplyMaterial({
+                            input: Cylinder({ height: topY - 0.022, radiusLow: rBody, resolution: 48, anchor: [0.5, 0, 0.5] }),
+                            material: assets.filterMaterial
+                        })
+                    }),
+                    translate: [0, 0.024, 0]
+                })
+                const capBottom = Transform({
+                    input: ApplyMaterial({
+                        input: Cylinder({ height: 0.014, radiusLow: rCap, resolution: 48, anchor: [0.5, 0, 0.5] }),
+                        material: assets.dark
+                    }),
+                    translate: [0, 0.01, 0]
+                })
+                const capTop = Transform({
+                    input: ApplyMaterial({
+                        input: Cylinder({ height: 0.01, radiusLow: rCap, resolution: 48, anchor: [0.5, 0, 0.5] }),
+                        material: assets.dark
+                    }),
+                    translate: [0, topY, 0]
+                })
+                return Group([body, capBottom, capTop])
+            produces: MESHES
+        upperShell:
+            doc: |
+                Hollow upper body: outer wall ring from the intake band top up to
+                the very top edge, leaving the top well open. The rear sensor
+                door, button, slots, and LED hole are cut into its back wall.
+            pipe:
+              - op: Difference
+                input:
+                    items:
+                      - pipe:
+                          - op: Difference
+                            input:
+                                items:
+                                  - asset: profile
+                                  - asset: innerRect
+                          - op: Extrude
+                            with:
+                                height:
+                                    expression: |
+                                        0.298 * params.height
+                          - op: Transform
+                            with:
+                                translate:
+                                    expression: |
+                                        [0, 0.702 * params.height, 0]
+                      - asset: backCuts
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: white
+        wellWall:
+            doc: |
+                White funnel wall of the top well: rounded-square outside,
+                circular fan opening inside. The rear vent-slot cuts continue
+                through it so the sensor slots open into shadowed interior.
+            pipe:
+              - op: Difference
+                input:
+                    items:
+                      - pipe:
+                          - op: Difference
+                            input:
+                                items:
+                                  - asset: innerRect
+                                  - op: Circle
+                                    with:
+                                        radius:
+                                            expression: |
+                                                0.42 * params.width
+                          - op: Extrude
+                            with:
+                                height: 0.108
+                          - op: Transform
+                            with:
+                                translate:
+                                    expression: |
+                                        [0, params.height - 0.115, 0]
+                      - asset: backCuts
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: white
+        wellFloor:
+            pipe:
+              - op: Cylinder
+                with:
+                    height: 0.003
+                    radiusLow:
+                        expression: |
+                            0.416 * params.width
+                    anchor: [0.5, 0, 0.5]
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: dark
+              - op: Transform
+                with:
+                    translate:
+                        expression: |
+                            [0, params.height - 0.1145, 0]
+        fan:
+            doc: |
+                9-blade axial fan visible through the grille: pitched blades
+                around a central hub, sized to the fan opening.
+            pipe:
+              - expression: |
+                    const W = params.width
+                    const blades = []
+                    for (let i = 0; i < 9; i++) {
+                        blades.push(Transform({
+                            input: Transform({
+                                input: Box({ size: [0.3 * W, 0.0028, 0.028] }),
+                                rotate: [32, 0, 0],
+                                translate: [0.24 * W, 0, 0]
+                            }),
+                            rotate: [0, i * 40, 0]
+                        }))
+                    }
+                    const hub = Transform({
+                        input: Cylinder({ height: 0.028, radiusLow: 0.128 * W, anchor: [0.5, 0, 0.5] }),
+                        translate: [0, -0.014, 0]
+                    })
+                    return Group([Group(blades), hub])
+                produces: MESHES
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: midGray
+              - op: Transform
+                with:
+                    translate:
+                        expression: |
+                            [0, params.height - 0.095, 0]
+        grille2d:
+            expression: |
+                const W = params.width
+                const s = W / 0.25
+                const outer = Rect({ size: [W - 0.02, W - 0.02], cornerRadius: [0.048 * s, 0.048 * s] })
+                const rim = Difference([outer, Rect({ size: [W - 0.034, W - 0.034], cornerRadius: [0.042 * s, 0.042 * s] })])
+                const ring = Difference([Circle({ radius: 0.078 * s }), Circle({ radius: 0.0735 * s })])
+                const hub = Circle({ radius: 0.046 * s })
+                const parts = [rim, ring, hub]
+                const slats = 72
+                const step = 360 / slats
+                for (let i = 0; i < slats; i++) {
+                    const slat = Transform({
+                        input: Transform({
+                            input: Rect({ size: [0.512 * W, 0.0022], anchor: [0, 0.5] }),
+                            translate: [0.16 * W, 0]
+                        }),
+                        degrees: i * step
+                    })
+                    parts.push(slat)
+                }
+                return Intersection([Union(parts), outer])
+            produces: POLYGONS
+        grille:
+            pipe:
+              - asset: grille2d
+              - op: Extrude
+                with:
+                    height: 0.0045
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: lightGray
+              - op: Transform
+                with:
+                    translate:
+                        expression: |
+                            [0, params.height - 0.0075, 0]
+        hubButton:
+            pipe:
+              - op: Cylinder
+                with:
+                    height: 0.0015
+                    radiusLow: 0.0075
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: midGray
+              - op: Transform
+                with:
+                    translate:
+                        expression: |
+                            [0, params.height - 0.0027, 0.08 * params.width]
+        display:
+            group:
+              - pipe:
+                  - op: Cylinder
+                    with:
+                        height: 0.004
+                        radiusLow: 0.036
+                  - op: Transform
+                    with:
+                        rotate: [90, 0, 0]
+                        translate:
+                            expression: |
+                                [0, 0.777 * params.height, params.width / 2 - 0.0005]
+                  - op: ApplyMaterial
+                    with:
+                        material:
+                            asset: silver
+              - pipe:
+                  - op: Cylinder
+                    with:
+                        height: 0.004
+                        radiusLow: 0.0325
+                  - op: Transform
+                    with:
+                        rotate: [90, 0, 0]
+                        translate:
+                            expression: |
+                                [0, 0.777 * params.height, params.width / 2 + 0.0002]
+                  - op: ApplyMaterial
+                    with:
+                        material:
+                            asset: screenBlack
+        backWhite:
+            doc: |
+                White rear details: the latch tab under the sensor door and the
+                floor of the grip pocket behind its opening.
+            pipe:
+              - expression: |
+                    const W = params.width
+                    const H = params.height
+                    const face = W / 2
+                    const tab = Transform({
+                        input: RoundedBox({ size: [0.017, 0.012, 0.002], radius: 0.0008 }),
+                        translate: [0, 0.816 * H - 0.0325, -(face + 0.0002)]
+                    })
+                    const pocketBack = Transform({
+                        input: RoundedBox({ size: [0.066, 0.032, 0.012], radius: 0.003 }),
+                        translate: [0, 0.67 * H, -(face - 0.019)]
+                    })
+                    return Group([tab, pocketBack])
+                produces: MESHES
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: white
+    render:
+        group:
+          - asset: base
+          - asset: lowerShell
+          - asset: filter
+          - asset: upperShell
+          - asset: wellWall
+          - asset: wellFloor
+          - asset: fan
+          - asset: grille
+          - asset: hubButton
+          - asset: display
+          - asset: backWhite
+main.moon.webp: !!binary |
+    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
