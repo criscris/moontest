@@ -1,0 +1,652 @@
+# moons v1
+main.moon: |
+    moon: "1.0"
+    doc: |
+        A 7ft pool billiards dining table modeled after reference photos:
+        walnut top rails with white painted apron and tapered legs, blue-grey
+        fast cloth, six fabric pockets with black plastic C-shaped rims,
+        white round rail sights, and standard 57.15 mm billiard balls.
+        Outer dimensions 2.15 x 1.22 x 0.79 m; frame (wood + cushion) is 14 cm
+        from the outer edge to the cushion nose all around, so the playing field
+        follows the outer dimensions (1.87 x 0.94 m nose to nose at defaults).
+    params:
+        length:
+            default: 2.15
+            doc: |
+                Outer length of the table in meters.
+            category: Dimensions
+            min: 1.8
+            max: 2.9
+        width:
+            default: 1.22
+            doc: |
+                Outer width of the table in meters.
+            category: Dimensions
+            min: 1.0
+            max: 1.6
+        height:
+            default: 0.79
+            doc: |
+                Height of the rail top above the floor in meters.
+            category: Dimensions
+            min: 0.7
+            max: 0.85
+        ballDiameter:
+            default: 0.05715
+            doc: |
+                Standard pool ball diameter (2 1/4 inch = 57.15 mm).
+            category: Play
+            min: 0.05
+            max: 0.062
+        showBalls:
+            default: true
+            doc: |
+                Scatter a set of balls on the cloth like in the reference photos.
+            category: Play
+        clothColor:
+            default: [0.55, 0.65, 0.72, 1]
+            kind: color
+            doc: |
+                Color of the fast cloth (blue-grey like the reference).
+            category: Appearance
+    assets:
+        clothMaterial:
+            doc: |
+                Procedural woven billiard cloth: plain-weave height field
+                (checkerboard of warp/weft thread bumps) plus fiber noise,
+                turned into color, normal, and roughness maps.
+            expression: |
+                const n = 512, threads = 72, p = n / threads
+                const [x, y] = Coords({ shape: [n, n] })
+                const wx = Sin(x * (Math.PI / p)) ** 2
+                const wy = Sin(y * (Math.PI / p)) ** 2
+                const c = (Floor(x / p) + Floor(y / p)) % 2
+                const fiber = Noise({ shape: [n, n], seed: 5, scale: 180 })
+                const h = (c * wy + (1 - c) * wx) * 0.8 + fiber * 0.2
+                // only a whisper of soft variation — anything stronger repeats
+                // visibly at the 5 cm tile size and drowns the weave detail
+                const mottle = Noise({ shape: [n, n], seed: 9, scale: 5, type: "fbm" })
+                const b = 0.78 + h * 0.28 + (mottle - 0.5) * 0.025
+                const one = Fill({ value: 1, shape: [n, n] })
+                const color = Image(StackAxis({ input: [
+                    Clamp(b * params.clothColor[0]),
+                    Clamp(b * params.clothColor[1]),
+                    Clamp(b * params.clothColor[2]),
+                    one
+                ], axis: 2 }))
+                // normal map from the height field (wrap-around finite differences)
+                const idx = (Range({ count: n }) + 1) % n
+                const s = 1.4
+                const dx = (Gather({ input: h, indices: idx, axis: 1 }) - h) * s
+                const dy = (Gather({ input: h, indices: idx, axis: 0 }) - h) * s
+                const inv = 1 / Sqrt(dx * dx + dy * dy + 1)
+                const normal = Image(StackAxis({ input: [
+                    -dx * inv * 0.5 + 0.5, dy * inv * 0.5 + 0.5, inv * 0.5 + 0.5
+                ], axis: 2 }))
+                const roughness = Image(Clamp(0.97 - h * 0.12))
+                return Material({ color, normal, roughness, textureSizeInMeters: 0.05 })
+            produces: MATERIAL
+        steelMaterial:
+            doc: |
+                Procedural white hammered powder-coat: two octaves of dimple
+                noise drive a bumpy normal map and a semi-gloss roughness map
+                (crests shinier, pits duller), over a warm off-white color
+                with faint large-scale mottling.
+            expression: |
+                const n = 512
+                const d1 = Noise({ shape: [n, n], seed: 3, scale: 90 })
+                const d2 = Noise({ shape: [n, n], seed: 7, scale: 40 })
+                const h = Clamp(d1 * 0.55 + d2 * 0.45)
+                // keep large-scale mottle minimal — it repeats per tile and
+                // reads as blotches on the big flat faces
+                const mottle = Noise({ shape: [n, n], seed: 12, scale: 4, type: "fbm" })
+                const b = 0.9 + (mottle - 0.5) * 0.012 + h * 0.06
+                const one = Fill({ value: 1, shape: [n, n] })
+                const color = Image(StackAxis({ input: [
+                    Clamp(b * 0.93), Clamp(b * 0.93), Clamp(b * 0.9), one
+                ], axis: 2 }))
+                const idx = (Range({ count: n }) + 1) % n
+                const s = 2.2
+                const dx = (Gather({ input: h, indices: idx, axis: 1 }) - h) * s
+                const dy = (Gather({ input: h, indices: idx, axis: 0 }) - h) * s
+                const inv = 1 / Sqrt(dx * dx + dy * dy + 1)
+                const normal = Image(StackAxis({ input: [
+                    -dx * inv * 0.5 + 0.5, dy * inv * 0.5 + 0.5, inv * 0.5 + 0.5
+                ], axis: 2 }))
+                const roughness = Image(Clamp(0.62 - h * 0.35 + (mottle - 0.5) * 0.02))
+                return Material({ color, normal, roughness, textureSizeInMeters: 0.09 })
+            produces: MATERIAL
+        digits:
+            doc: |
+                Centered glyph outlines for a ball number decal (Text cannot
+                be called from expressions, so it lives in a composition).
+            params:
+                label: "8"
+                size: 0.02
+            render:
+                op: Text
+                with:
+                    text:
+                        param: label
+                    fontSize:
+                        param: size
+                    alignX: center
+                    alignY: center
+        ballShadowMaterial:
+            doc: |
+                Cloth-colored patch with a soft radial contact shadow, placed
+                under each ball as fake baked ambient occlusion. Uses the same
+                weave pattern, pitch, and tone as the cloth material so the
+                square patch edges blend invisibly into the tiled cloth.
+            expression: |
+                const n = 512
+                const sizeM = params.ballDiameter             // patch = one ball diameter
+                const p = n / (sizeM * 1440)                  // px per thread (cloth: 72 threads / 5 cm)
+                const [x, y] = Coords({ shape: [n, n] })
+                const wx = Sin(x * (Math.PI / p)) ** 2
+                const wy = Sin(y * (Math.PI / p)) ** 2
+                const c = (Floor(x / p) + Floor(y / p)) % 2
+                const fiber = Noise({ shape: [n, n], seed: 5, scale: 260 })
+                const h = (c * wy + (1 - c) * wx) * 0.8 + fiber * 0.2
+                // radial gaussian shadow, windowed to exactly zero before the
+                // patch edge so the border is guaranteed invisible
+                const [cx, cy] = Coords({ shape: [n, n], center: true })
+                const d = Sqrt(cx * cx + cy * cy)
+                const blob = Exp(-(d * d) / (0.088 * n * n))
+                const window = 1 - Smoothstep({ input: d, edge0: n * 0.28, edge1: n * 0.48 })
+                const shade = 1 - 0.5 * blob * window
+                const b = (0.78 + h * 0.28) * shade
+                const one = Fill({ value: 1, shape: [n, n] })
+                const color = Image(StackAxis({ input: [
+                    Clamp(b * params.clothColor[0]),
+                    Clamp(b * params.clothColor[1]),
+                    Clamp(b * params.clothColor[2]),
+                    one
+                ], axis: 2 }))
+                const idx = (Range({ count: n }) + 1) % n
+                const s = 1.4
+                const dx = (Gather({ input: h, indices: idx, axis: 1 }) - h) * s
+                const dy = (Gather({ input: h, indices: idx, axis: 0 }) - h) * s
+                const inv = 1 / Sqrt(dx * dx + dy * dy + 1)
+                const normal = Image(StackAxis({ input: [
+                    -dx * inv * 0.5 + 0.5, dy * inv * 0.5 + 0.5, inv * 0.5 + 0.5
+                ], axis: 2 }))
+                const roughness = Image(Clamp(0.97 - h * 0.12))
+                return Material({ color, normal, roughness })
+            produces: MATERIAL
+        walnut:
+            op: Material
+            with:
+                    color:
+                        import: https://assets.moonomat.com/textures/ambientcg/Wood/Wood026_Color.jpg
+                    normal:
+                        import: https://assets.moonomat.com/textures/ambientcg/Wood/Wood026_NormalGL.jpg
+                    roughness:
+                        import: https://assets.moonomat.com/textures/ambientcg/Wood/Wood026_Roughness.jpg
+    render:
+        expression: |
+            const L = params.length, W = params.width, H = params.height
+            const woodT = 0.04                    // rail top to playing surface (cushion height + clearance)
+            const railT = 0.02                    // walnut top cladding thickness (real table: 2 cm)
+            const bedTop = H - woodT              // playing surface level
+            const railW = 0.14                    // wood + cushion, outer edge to nose (14 cm all around)
+            const fieldL = L - 2 * railW          // 1.87 m nose to nose at defaults
+            const fieldW = W - 2 * railW          // 0.94 m at defaults (~exact 2:1)
+            const cushTop = 0.045                 // cushion width at the nose (top)
+            const cushBase = 0.036                // cushion width at the base
+            const cushH = 0.037                   // cushion height (~63% of ball)
+            const xi = fieldL / 2 + cushTop       // inner edge of wood, long axis
+            const zi = fieldW / 2 + cushTop       // inner edge of wood, short axis
+            const ballR = params.ballDiameter / 2
+            const s2 = Math.SQRT1_2
+
+            // ---- materials ------------------------------------------------
+            const cloth = assets.clothMaterial
+            const white = assets.steelMaterial
+            const blackPlastic = Material({ color: [0.05, 0.05, 0.05, 1], roughness: 0.75 })
+            const pocketFabric = Material({ color: [0.04, 0.04, 0.045, 1], roughness: 1 })
+
+            // ---- pockets: 4 corner + 2 side --------------------------------
+            const cornerR = 0.062, sideR = 0.056
+            const pockets = []
+            for (const sx of [-1, 1])
+                for (const sz of [-1, 1])
+                    pockets.push({ x: sx * (xi - 0.026), z: sz * (zi - 0.026), r: cornerR, d: [sx * s2, sz * s2], corner: true })
+            for (const sz of [-1, 1])
+                pockets.push({ x: 0, z: sz * (zi - 0.008), r: sideR, d: [0, sz], corner: false })
+
+            const holes = pockets.map(p => Transform({
+                input: Cylinder({ height: 0.4, radiusLow: p.r, resolution: 48 }),
+                translate: [p.x, bedTop, p.z]
+            }))
+
+            // ---- walnut top rail frame ------------------------------------
+            // thin 2 cm walnut cladding on top; the 2 cm between it and the
+            // playing surface is a white base band (the apron continuing up,
+            // slightly inset so the walnut lip overhangs it)
+            let wood = Difference([
+                Transform({ input: Box({ size: [L, railT, W] }), translate: [0, H - railT / 2, 0] }),
+                Box({ size: [2 * xi, 4, 2 * zi] }),
+                ...holes
+            ])
+            wood = TileMaterial({ input: ApplyMaterial({ input: wood, material: assets.walnut }) })
+            const railBase = Difference([
+                Transform({ input: Box({ size: [L - 0.04, woodT - railT, W - 0.04] }), translate: [0, bedTop + (woodT - railT) / 2, 0] }),
+                Box({ size: [2 * xi, 4, 2 * zi] }),
+                ...holes
+            ])
+
+            // ---- bed: thin cloth skin on top, dark board below ------------
+            const bedX = 2 * (xi + 0.04), bedZ = 2 * (zi + 0.04)
+            const bed = Difference([
+                Transform({ input: Box({ size: [bedX, 0.006, bedZ] }), translate: [0, bedTop - 0.003, 0] }),
+                ...holes
+            ])
+            const bedBoard = Difference([
+                Transform({ input: Box({ size: [bedX, woodT - 0.006, bedZ] }), translate: [0, bedTop - 0.006 - (woodT - 0.006) / 2, 0] }),
+                ...holes
+            ])
+            const boardParts = ApplyMaterial({
+                input: bedBoard,
+                material: Material({ color: [0.16, 0.12, 0.09, 1], roughness: 0.9 })
+            })
+
+            // ---- cushions: undercut nose profile, angled pocket jaws ------
+            // len is the BASE (wood-side) length; the nose edge is inset by
+            // jawL/jawR at the ends, so each mouth is widest at the play field
+            // and the straight jaw faces converge toward the pocket hole.
+            // The end faces still overhang: their top edge extends toward the
+            // pocket by jawOver (undercut, like the nose profile).
+            const jawOver = cushTop - cushBase
+            // ext extends the prism outward over the wood (used by the blocker
+            // volumes so pocket rubber is clipped at the jaw line even on the rail)
+            const cushionPrism = (len, jawL, jawR, h, ext = 0) => Extrude({
+                input: Polygon({ points: [
+                    [-len / 2, ext], [len / 2, ext],
+                    [len / 2 - jawR, -cushBase], [-len / 2 + jawL, -cushBase]
+                ] }),
+                height: h,
+                scaleTop: [1 + 2 * jawOver * h / (len * cushH), 1 + (cushTop / cushBase - 1) * (h / cushH)]
+            })
+
+            // jaw runs chosen so each straight face (incl. its overhanging top
+            // edge) stays tangent-clear of the pocket bore: one straight cut,
+            // never re-cut round by the hole.
+            const sideJaw = 0.013, cornerJaw = 0.048
+            const sideMouthHalf = 0.07, cornerSetback = 0.085
+            const x0 = sideMouthHalf - sideJaw
+            const x1 = fieldL / 2 - cornerSetback + cornerJaw
+            const lenLong = x1 - x0, xc = (x0 + x1) / 2
+            const lenShort = fieldW - 2 * cornerSetback + 2 * cornerJaw
+            const placeCushions = (h, ext = 0) => {
+                const north = Group([
+                    Transform({ input: cushionPrism(lenLong, sideJaw, cornerJaw, h, ext), translate: [xc, bedTop, zi] }),
+                    Transform({ input: cushionPrism(lenLong, cornerJaw, sideJaw, h, ext), translate: [-xc, bedTop, zi] })
+                ])
+                return Group([
+                    north,
+                    Transform({ input: north, rotate: [0, 180, 0] }),
+                    Transform({ input: cushionPrism(lenShort, cornerJaw, cornerJaw, h, ext), rotate: [0, 90, 0], translate: [xi, bedTop, 0] }),
+                    Transform({ input: cushionPrism(lenShort, cornerJaw, cornerJaw, h, ext), rotate: [0, -90, 0], translate: [-xi, bedTop, 0] })
+                ])
+            }
+            const cushions = Difference([placeCushions(cushH), ...holes])
+            const clothParts = TileMaterial({ input: ApplyMaterial({ input: Group([bed, cushions]), material: cloth }) })
+
+            // ---- white apron and tapered legs -----------------------------
+            const apron = Difference([
+                Transform({ input: Box({ size: [L - 0.04, 0.08, W - 0.04] }), translate: [0, bedTop - 0.04, 0] }),
+                Box({ size: [L - 0.12, 2, W - 0.12] }),
+                ...holes
+            ])
+            // legs stop short of the floor; round adjustable feet take over
+            const legLift = 0.03
+            const leg = Box({ size: [0.08, bedTop - legLift, 0.08], anchor: [0.5, 0, 0.5] })
+            // clearance cut for the pocket cups: only as deep as the cups reach
+            const legHoles = pockets.map(p => Transform({
+                input: Cylinder({ height: 0.215, radiusLow: p.r + 0.012, resolution: 48, anchor: [0.5, 0, 0.5] }),
+                translate: [p.x, bedTop - 0.1, p.z]
+            }))
+            const legs = Difference([
+                Group([-1, 1].flatMap(sx => [-1, 1].map(sz =>
+                    Transform({ input: leg, translate: [sx * (L / 2 - 0.06), legLift, sz * (W / 2 - 0.06)] })
+                ))),
+                ...legHoles
+            ])
+            // ---- white steel support grid under the bed -------------------
+            // two long bars split the width into three equal bays. Outer
+            // bays: a square box framed around each pocket (box side = bay
+            // width). Middle bay: exactly 3 dividers at 1/4, 1/2, 3/4 of
+            // the length. Bars span the apron opening; tops sit against the
+            // bed board underside, bottoms flush with the apron bottom edge
+            // (nothing sticks out below the frame).
+            const barW = 0.025
+            const barTop = bedTop - woodT              // bed board underside
+            const barH = 0.08 - woodT                  // flush with apron bottom
+            const innerL = L - 0.12, innerW = W - 0.12 // apron inner opening
+            // long bars 0.66 m apart center-to-center (measured on the real
+            // table, = 0.6 of the apron opening) — middle bay wider than the
+            // two pocket rows
+            const zBar = innerW * 0.3
+            const bw = innerW / 2 - zBar               // outer bay width
+            const outerXs = [-(innerL / 2 - bw), -bw / 2, bw / 2, innerL / 2 - bw]
+            const midXs = [-innerL / 4, 0, innerL / 4]
+            const longBar = z => Transform({
+                input: Box({ size: [innerL, barH, barW], anchor: [0.5, 1, 0.5] }),
+                translate: [0, barTop, z]
+            })
+            const crossBar = (x, z0, z1) => Transform({
+                input: Box({ size: [barW, barH, z1 - z0], anchor: [0.5, 1, 0] }),
+                translate: [x, barTop, z0]
+            })
+            const bays = [
+                { z0: -innerW / 2, z1: -zBar - barW / 2, xs: outerXs },
+                { z0: -zBar + barW / 2, z1: zBar - barW / 2, xs: midXs },
+                { z0: zBar + barW / 2, z1: innerW / 2, xs: outerXs }
+            ]
+            const grid = Difference([
+                Group([
+                    longBar(-zBar), longBar(zBar),
+                    ...bays.flatMap(b => b.xs.map(x => crossBar(x, b.z0, b.z1)))
+                ]),
+                ...legHoles
+            ])
+
+            const whiteParts = TileMaterial({ input: ApplyMaterial({ input: Group([apron, railBase, legs, grid]), material: white }) })
+
+            // ---- round adjustable feet under each leg ---------------------
+            // black foot pad on the floor + threaded stem up into the leg
+            const footR = 0.034, footH = 0.01
+            const feet = Group([-1, 1].flatMap(sx => [-1, 1].map(sz => {
+                const fx = sx * (L / 2 - 0.06), fz = sz * (W / 2 - 0.06)
+                return Group([
+                    Transform({
+                        input: Cylinder({ height: footH, radiusLow: footR, resolution: 48, anchor: [0.5, 0, 0.5] }),
+                        translate: [fx, 0, fz]
+                    }),
+                    Transform({
+                        input: Cylinder({ height: legLift + 0.02, radiusLow: 0.011, resolution: 24, anchor: [0.5, 0, 0.5] }),
+                        translate: [fx, footH - 0.004, fz]
+                    })
+                ])
+            })))
+            const feetParts = ApplyMaterial({ input: feet, material: blackPlastic })
+
+            // ---- black plastic C-shaped pocket rims -----------------------
+            const rims = pockets.map(p => {
+                // local 2D frame: hole center at origin, +y toward the wood.
+                // crescent: outer arc on the wood, inner arc overhanging the hole
+                // by 8 mm at the deepest point, tapering to rounded horn tips.
+                // the rubber lives on the wood only: its footprint is clipped by
+                // the wood region itself (straight seam at side pockets, V at
+                // corners), then rounded — horns taper to rounded tips at the seam.
+                // corner wood region = union of the two rail half-planes, written
+                // as one explicit chevron polygon (apex where the seams meet).
+                // Shifted 2.5 mm past the seam so the rubber laps onto the cloth
+                // edge (it sits 3 mm above the cushion top) — guaranteed contact.
+                const co = 0.026 * Math.SQRT2 - 0.0035
+                const woodRegion = p.corner
+                    ? Polygon({ points: [
+                        [0.3, co - 0.3], [0, co], [-0.3, co - 0.3], [-0.3, 0.3], [0.3, 0.3]
+                    ] })
+                    : Transform({ input: Rect({ size: [0.6, 0.3], anchor: [0.5, 0] }), translate: [0, 0.0055] })
+                // inner cut: the bore circle at the flanks (plate edge meets the
+                // bore wall — one piece with the wall below), the shifted circle
+                // only at the back (8 mm overhang lip); front stays uncovered.
+                // corners: larger outer arc + gentler rounding, so the horns
+                // survive the shallow seam angle and run right up to the cushions
+                const outerR = p.r + (p.corner ? 0.024 : 0.02)
+                const roundR = p.corner ? 0.0025 : 0.004
+                const crescent2D = Offset({
+                    input: Offset({
+                        input: Intersection([
+                            Difference([
+                                Transform({ input: Circle({ radius: outerR, resolution: 96 }), translate: [0, -0.002] }),
+                                Intersection([
+                                    Transform({ input: Circle({ radius: p.r + 0.014, resolution: 96 }), translate: [0, -0.022] }),
+                                    Circle({ radius: p.r - 0.001, resolution: 96 })
+                                ])
+                            ]),
+                            woodRegion
+                        ]),
+                        delta: -roundR
+                    }),
+                    delta: roundR,
+                    joinType: "round"
+                })
+                const plate = Transform({ input: Extrude({ input: crescent2D, height: 0.008 }), translate: [0, 0.073, 0] })
+                // rebound back wall: recessed 4 mm behind the plate lip, top flush
+                // with the wood so the overhanging plate covers it from above
+                const wall2D = Intersection([
+                    Difference([
+                        Transform({ input: Circle({ radius: p.r + 0.018, resolution: 96 }), translate: [0, -0.022] }),
+                        Transform({ input: Circle({ radius: p.r + 0.0105, resolution: 96 }), translate: [0, -0.022] })
+                    ]),
+                    Circle({ radius: p.r, resolution: 96 })
+                ])
+                const wall = Extrude({ input: wall2D, height: 0.073 })
+                // thin dark liner over the wood-backed arc of the hole wall,
+                // hiding the raw walnut cut faces inside the bore
+                const tube2D = Intersection([
+                    Difference([
+                        Circle({ radius: p.r + 0.001, resolution: 96 }),
+                        Circle({ radius: p.r - 0.002, resolution: 96 })
+                    ]),
+                    woodRegion
+                ])
+                const tube = Transform({ input: Extrude({ input: tube2D, height: 0.04 }), translate: [0, 0.033, 0] })
+                return Transform({
+                    input: Group([plate, wall, tube]),
+                    rotate: [0, Math.atan2(p.d[0], p.d[1]) * 180 / Math.PI, 0],
+                    translate: [p.x, H - 0.073, p.z]
+                })
+            })
+            const rimParts = ApplyMaterial({ input: Group(rims), material: blackPlastic })
+
+            // ---- dark fabric pocket cups below each hole ------------------
+            // cups reach 1.5 cm below the apron/grid bottom plane so their
+            // bottom faces never z-fight with the steel bars seen from below
+            const liners = pockets.map(p => Difference([
+                Transform({ input: Cylinder({ height: 0.093, radiusLow: p.r + 0.01, resolution: 32, anchor: [0.5, 0, 0.5] }), translate: [p.x, bedTop - 0.095, p.z] }),
+                Transform({ input: Cylinder({ height: 0.2, radiusLow: p.r - 0.005, resolution: 32, anchor: [0.5, 0, 0.5] }), translate: [p.x, bedTop - 0.068, p.z] })
+            ]))
+            const linerParts = ApplyMaterial({ input: Group(liners), material: pocketFabric })
+
+            // ---- white round rail sights (diamond positions) --------------
+            const dot = Cylinder({ height: 0.002, radiusLow: 0.0065, resolution: 24, anchor: [0.5, 0, 0.5] })
+            const dotPositions = []
+            const zLong = (zi + W / 2) / 2, xShort = (xi + L / 2) / 2
+            for (const sz of [-1, 1])
+                for (const sx of [-1, 1])
+                    for (const i of [1, 2, 3])
+                        dotPositions.push([sx * fieldL * i / 8, sz * zLong])
+            for (const sx of [-1, 1])
+                for (const dz of [-fieldW / 4, 0, fieldW / 4])
+                    dotPositions.push([sx * xShort, dz])
+            const sights = ApplyMaterial({
+                input: Group(dotPositions.map(p => Transform({ input: dot, translate: [p[0], H - 0.001, p[1]] }))),
+                material: Material({ color: [0.96, 0.95, 0.92, 1], roughness: 0.3 })
+            })
+
+            // ---- standard 8-ball break rack + cue ball --------------------
+            // WPA colors: 1 yellow, 2 blue, 3 red, 4 purple, 5 orange,
+            // 6 green, 7 maroon, 8 black; 9-15 the same colors as a stripe
+            // on white. Triangle apex on the foot spot (quarter field), 8-ball
+            // in the center of row 3, mixed corners; cue ball on the head spot.
+            const ballColors = [
+                [0.95, 0.77, 0.06, 1],
+                [0.09, 0.26, 0.65, 1],
+                [0.82, 0.10, 0.10, 1],
+                [0.35, 0.15, 0.50, 1],
+                [0.95, 0.45, 0.08, 1],
+                [0.07, 0.42, 0.22, 1],
+                [0.55, 0.12, 0.15, 1],
+                [0.05, 0.05, 0.05, 1]
+            ]
+            const ballWhite = [0.95, 0.93, 0.88, 1]
+            // balls are built by PARTITIONING one sphere with booleans: the
+            // colored body, the stripe belt, and the white number spots are
+            // complementary pieces of the same radius that meet at seams —
+            // never overlapping shells — so nothing can z-fight and every
+            // ball is perfectly round.
+            const ballMat = c => Material({ color: c, roughness: 0.08 })
+            const ballSphere = Sphere({ radius: ballR, resolution: 48 })
+            const capCyl = Cylinder({ height: ballR * 4, radiusLow: ballR * 0.3, resolution: 32 })
+            const stripeSlab = Box({ size: [ballR * 3, ballR * 0.92, ballR * 3] })
+            const capSpots = ApplyMaterial({
+                input: Intersection([ballSphere, capCyl]),
+                material: ballMat(ballWhite)
+            })
+            const solidBall = c => Group([
+                ApplyMaterial({ input: Difference([ballSphere, capCyl]), material: ballMat(c) }),
+                capSpots
+            ])
+            const stripeBall = c => Group([
+                ApplyMaterial({ input: Difference([ballSphere, stripeSlab]), material: ballMat(ballWhite) }),
+                ApplyMaterial({ input: Intersection([ballSphere, stripeSlab]), material: ballMat(c) })
+            ])
+            const digitPlate = num => {
+                const glyph = assets.digits({ label: String(num), size: (num < 10 ? 0.5 : 0.38) * ballR })
+                const top = Intersection([
+                    Extrude({ input: glyph, height: ballR * 2.2 }),
+                    Sphere({ radius: ballR * 1.003, resolution: 48 })
+                ])
+                return Group([top, Transform({ input: top, rotate: [180, 0, 0] })])
+            }
+            const numberedBall = num => Group([
+                num <= 8 ? solidBall(ballColors[num - 1]) : stripeBall(ballColors[num - 9]),
+                ApplyMaterial({ input: digitPlate(num), material: ballMat([0.05, 0.05, 0.05, 1]) })
+            ])
+            const placeBall = (num, x, z) => Transform({
+                input: num === 0 ? solidBall(ballWhite) : numberedBall(num),
+                rotate: [(num * 47) % 50 - 25, (num * 71) % 180, (num * 29) % 50 - 25],
+                translate: [x, bedTop + ballR, z]
+            })
+            const rack = [[1], [9, 2], [10, 8, 3], [11, 7, 14, 4], [5, 13, 15, 6, 12]]
+            const spread = 1.002
+            const rowStep = 2 * ballR * spread * Math.sqrt(3) / 2
+            // rack shifted so the 8-ball (row 3 center) sits exactly on the
+            // line halfway between the side and corner pockets (x = fieldL/4)
+            const ballPos = []
+            rack.forEach((row, i) => row.forEach((num, j) => {
+                ballPos.push([num, fieldL / 4 + (i - 2) * rowStep, (j - i / 2) * 2 * ballR * spread])
+            }))
+            ballPos.push([0, -fieldL / 4, 0])
+            const ballSet = Group(ballPos.map(([num, x, z]) => placeBall(num, x, z)))
+
+            // fake-AO contact shadows: a round UV-mapped disc under each
+            // ball with a radial darkening, color-matched to the cloth so
+            // its edge vanishes. Disc radius = ballR, so patches of touching
+            // balls can only ever meet, never overlap (no z-fighting).
+            // Built as a mesh record because booleans would destroy the UVs.
+            const discN = 48
+            const discVerts = [[0, 0, 0]], discUVs = [[0.5, 0.5]], discTris = []
+            for (let i = 0; i < discN; i++) {
+                const a = i * 2 * Math.PI / discN
+                discVerts.push([Math.cos(a) * ballR, 0, Math.sin(a) * ballR])
+                discUVs.push([0.5 + 0.5 * Math.cos(a), 0.5 + 0.5 * Math.sin(a)])
+                discTris.push([0, ((i + 1) % discN) + 1, i + 1])
+            }
+            const shadowSheet = ApplyMaterial({
+                input: Mesh({
+                    vertices: discVerts,
+                    triangles: discTris,
+                    normals: discVerts.map(() => [0, 1, 0]),
+                    materialUVs: discUVs
+                }),
+                material: assets.ballShadowMaterial
+            })
+            const ballShadows = Group(ballPos.map(([, x, z]) => Transform({
+                input: shadowSheet,
+                translate: [x, bedTop + 0.0002, z]
+            })))
+
+            const parts = [wood, clothParts, boardParts, whiteParts, feetParts, rimParts, linerParts, sights]
+            if (params.showBalls) parts.push(ballShadows)
+            if (params.showBalls) parts.push(ballSet)
+            return Group(parts)
+        produces: MESHES
+main.moon.webp: !!binary |
+    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
+    AAA=
