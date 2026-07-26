@@ -1,0 +1,508 @@
+# moons v1
+main.moon: |
+    moon: "1.0"
+    doc: |
+        Barcelona chair (Ludwig Mies van der Rohe, 1929, Knoll) at 1:1 scale.
+        Side geometry follows Kimberly Elam's analysis: the chair fits a 750 mm
+        square; the front-leg/back bar is a quarter circle of radius S centered
+        at the top-front corner of the square; the seat rail is an arc of radius
+        S tangent-horizontal at its front tip; the rear leg is an arc of radius
+        S/2 centered on the rear edge at half height. Chromed 30x10 mm flat-steel
+        bars, leather straps, button-tufted leather cushions (5x4 panels,
+        pebbled dark-grey leather). Front faces +X (a seated person looks
+        toward +X); internally the profile is built facing -X and the final
+        assembly is yawed 180 degrees.
+    params:
+        show_cushions:
+            default: true
+            category: Appearance
+    assets:
+        chromeColorImg:
+            doc: |
+                Constant chrome albedo as a tiny texture (the texture Material
+                variant needs images). Chrome reflects well below an ideal
+                mirror (the old 0.95 read as white-hot), slightly rising toward
+                blue; ~0.75 keeps the metal bright without the mirror look under
+                this environment light.
+            expression: |
+                const c = [0.85, 0.86, 0.88]
+                return Image(StackAxis({
+                    input: c.map(v => Fill({ value: v, shape: [4, 4] })),
+                    axis: 2
+                }))
+            produces: IMAGE
+        chromeMetalImg:
+            expression: |
+                return Image(Fill({ value: 1, shape: [768, 768] }))
+            produces: IMAGE
+        chromeRoughImg:
+            doc: |
+                Streaked roughness map: fbm noise generated squat and stretched
+                vertically, giving faint elongated polishing marks around the
+                base roughness instead of a perfectly uniform sheen.
+            expression: |
+                const f = Noise({ shape: [96, 768], seed: 5, scale: 48, type: "fbm", octaves: 3 })
+                const r = Clamp({ input: 0.1 + (f - 0.5) * 0.07, min: 0.03, max: 0.5 })
+                return Resize({ input: Image(r), size: [768, 768] })
+            produces: IMAGE
+        chrome:
+            op: Material
+            with:
+                color:
+                    asset: chromeColorImg
+                roughness:
+                    asset: chromeRoughImg
+                metallic:
+                    asset: chromeMetalImg
+                textureSizeInMeters: 0.35
+        leatherColorImg:
+            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather026_Color.jpg
+        leatherNormalImg:
+            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather026_NormalGL.jpg
+        leatherRoughImg:
+            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather026_Roughness.jpg
+        leatherNormalProc:
+            expression: |
+                const t = Resize({ input: assets.leatherNormalImg, size: [1024, 1024] })
+                return Image(Clamp({ input: t.values * 0.35 + Data([0.5, 0.5, 1.0]) * 0.65, min: 0, max: 1 }))
+            produces: IMAGE
+        leatherRoughProc:
+            expression: |
+                return Resize({ input: assets.leatherRoughImg, size: [1024, 1024] })
+            produces: IMAGE
+        leather:
+            op: Material
+            with:
+                color:
+                    asset: leatherColorImg
+                normal:
+                    asset: leatherNormalProc
+                roughness:
+                    asset: leatherRoughProc
+                textureSizeInMeters: 0.5
+        strapLeather:
+            op: Material
+            with:
+                color: [0.03, 0.03, 0.033, 1]
+                roughness: 0.5
+                metallic: 0
+        frame:
+            expression: |
+                const res = 10
+                const X = d => d - 0.375
+                const deg = Math.PI / 180
+                // Curve A: quarter circle, center (0, 0.75), centerline radius 0.735
+                // (bar is 30 mm deep, so the outer face is the exact Elam circle).
+                const A = []
+                for (let i = 0; i <= 15; i++) {
+                    const t = i * 6 * deg
+                    A.push([X(0.744 * Math.sin(t)), 0.75 - 0.744 * Math.cos(t), 0])
+                }
+                // Curve B, front part (seat rail): radius-S arc, center (0, -0.405),
+                // tangent-horizontal at its front tip (0, 0.33). Runs to the
+                // tangency point (0.5351, 0.0988). Both arcs reach the junction
+                // at the SAME parameter angle 46.7264 deg, so a shared step of
+                // 46.7264/6 deg samples each arc exactly to the junction: the
+                // front loop ends on it (i = 6), the rear loop resumes one step
+                // below (i = 5). A rounded step (the previous 7.78 deg) leaves a
+                // 7.8 deg stretch of the rear arc unsampled, and the sweep spline
+                // bridges the gap ~0.7 mm inside the true arc (a visible dip in
+                // the wall near the rear foot).
+                const sB = (46.7264 / 6) * deg
+                const B = []
+                for (let i = 0; i <= 6; i++) {
+                    const t = i * sB
+                    B.push([X(0.735 * Math.sin(t)), -0.405 + 0.735 * Math.cos(t), 0])
+                }
+                // Curve B, rear part (rear leg): arc of centerline radius 0.2951,
+                // center (0.75, 0.3011) — exactly TANGENT to the seat-rail arc at
+                // the junction (no kink) and tangent to the floor at the rear foot.
+                for (let i = 5; i >= 0; i--) {
+                    const t = i * sB
+                    B.push([X(0.75 - 0.2951 * Math.sin(t)), 0.3011 - 0.2951 * Math.cos(t), 0])
+                }
+                // Flat-bar section: 30 mm wide (lateral), 12 mm high (in profile).
+                const section = Rect({ size: [0.030, 0.012] })
+                const bar = pts => Sweep({ input: section, path: pts, resolution: res })
+                // Reinforced crossing: one octagonal plate through the eight
+                // circle-tangency points (each boundary segment lies inside a bar
+                // or inside a subtracted circle -> gap-free), minus four R15
+                // circles for the concave corner fillets, as on the original.
+                const circle = o => Transform({ input: Circle({ radius: 0.0152, resolution: 256 }), translate: o })
+                // Circle centers solved for near-tangency to the two adjacent
+                // bar walls (bar A walls: radii 0.738/0.750 about (0, 0.75);
+                // seat-rail walls: radii 0.729/0.741 about (0, -0.405)) with a
+                // deliberate 0.2 mm penetration INTO each wall: an exactly
+                // tangent circle would meet the wall at a grazing 0 deg angle,
+                // which makes the Union's intersection edge wander through
+                // sliver triangles (a visible hairline on the chrome). The
+                // 0.2 mm sink gives a clean ~9 deg crossing that the follow-up
+                // normals-only Smooth shades over completely. The octagon
+                // vertices are the exact tangency points; they land just inside
+                // the sunk circles, so every boundary segment stays hidden
+                // inside a bar or a subtracted circle.
+                const webs2d = Difference([
+                    Polygon({ points: [
+                        [0.485285, 0.178165], [0.471379, 0.182215], [0.452429, 0.181846],
+                        [0.436223, 0.179088], [0.436058, 0.154641], [0.452279, 0.151708],
+                        [0.471272, 0.151187], [0.485168, 0.155083]
+                    ] }),
+                    circle([0.494812, 0.166574]), circle([0.461714, 0.193629]),
+                    circle([0.427463, 0.166901]), circle([0.461452, 0.139847])
+                ])
+                const web = Transform({
+                    input: Extrude({ input: webs2d, height: 0.030 }),
+                    rotate: [-90, 0, 0],
+                    translate: [-0.375, 0, 0.015]
+                })
+                // Union (not Group): the two bars and the web are all 30 mm wide
+                // and centered, so their side faces are EXACTLY coplanar where
+                // they overlap at the crossing. As separate meshes those
+                // coincident faces z-fight, showing stepped seam lines on the
+                // chrome. Union merges each side into one solid; the follow-up
+                // normals-only Smooth (subdivisions: 0) restores smooth shading
+                // across the merged curved walls and R15 fillets while
+                // minSharpAngle keeps the 90 deg rims crisp.
+                const side = Smooth({ input: Union([bar(A), bar(B), web]), subdivisions: 0, minSharpAngle: 45 })
+                const sides = Place({ input: side, positions: [[0, 0, -0.36], [0, 0, 0.36]] })
+                // Strap bars span exactly between the side bars' inner faces:
+                // side bars at z = +/-0.36, 30 mm wide -> inner faces at +/-0.345,
+                // so the bar length is precisely 0.69 m (flush butt-joint).
+                const cross = (d, y, tilt) => Transform({
+                    input: Box({ size: [0.026, 0.012, 0.69] }),
+                    rotate: [0, 0, tilt],
+                    translate: [X(d), y, 0]
+                })
+                // All three strap bars are welded between the side bars, co-planar
+                // with them: centered on the local arc, wide face along the local
+                // tangent. Top bar: back arc nearly vertical -> 90 deg. Shared
+                // strap bar: back arc at +46 deg. Front bar: seat-rail apex has a
+                // horizontal tangent -> 0 deg.
+                const frame = Group([sides, cross(0.7438, 0.737, 90), cross(0.537, 0.235, 46), cross(0.013, 0.330, -1)])
+                // TileMaterial generates the UV charts the textured chrome needs
+                // (the CSG'd frame has none) and scales them by the material's
+                // textureSizeInMeters.
+                return TileMaterial({ input: ApplyMaterial({ input: frame, material: assets.chrome }) })
+            produces: MESHES
+        backStraps:
+            expression: |
+                const X = d => d - 0.375
+                // Straight, taut straps: a chord from the strap bar up to the top
+                // bar, wrapping around each (they do NOT follow the curved bars).
+                // Bottom: wraps the shared bar from behind, around and including
+                // its underside. Top: a complete tight loop around the top bar.
+                const path = [
+                    [X(0.5211), 0.2298, 0], [X(0.5263), 0.2239, 0], [X(0.5323), 0.2190, 0],
+                    [X(0.5432), 0.2292, 0], [X(0.5529), 0.2402, 0],
+                    [X(0.5990), 0.3618, 0], [X(0.6450), 0.4834, 0], [X(0.6911), 0.6050, 0],
+                    [X(0.7247), 0.6937, 0], [X(0.7328), 0.7153, 0],
+                    [X(0.7353), 0.7218, 0], [X(0.7353), 0.7285, 0], [X(0.7353), 0.737, 0], [X(0.7355), 0.7522, 0],
+                    [X(0.7438), 0.7528, 0], [X(0.7521), 0.7522, 0], [X(0.7523), 0.737, 0],
+                    [X(0.7521), 0.7218, 0], [X(0.7438), 0.7212, 0], [X(0.7368), 0.7213, 0]
+                ]
+                const strap = Sweep({ input: Rect({ size: [0.036, 0.004] }), path, resolution: 6 })
+                // 8 back straps alternating with the 9 seat straps (17 total).
+                // 36 mm width < half the 75 mm pitch, so the two sets attach
+                // alternately at the shared bar without intersecting.
+                const zs = []
+                for (let i = 0; i < 8; i++) zs.push([0, 0, -0.2625 + i * 0.075])
+                return ApplyMaterial({ input: Place({ input: strap, positions: zs }), material: assets.strapLeather })
+            produces: MESHES
+        seatStraps:
+            expression: |
+                // Front-to-back straps: a complete tight loop around the front bar
+                // (tail tucked underneath), a straight run back, then over the top
+                // of the shared bar, down behind it, ending on its underside.
+                const X = d => d - 0.375
+                const path = [
+                    [X(0.024), 0.3217, 0], [X(0.010), 0.3212, 0], [X(-0.0025), 0.3218, 0],
+                    [X(-0.0028), 0.330, 0], [X(-0.0025), 0.3382, 0], [X(0.013), 0.3388, 0],
+                    [X(0.022), 0.3386, 0], [X(0.0285), 0.3382, 0],
+                    [X(0.045), 0.3357, 0], [X(0.09), 0.3280, 0],
+                    [X(0.15), 0.3178, 0], [X(0.30), 0.2922, 0], [X(0.45), 0.2666, 0],
+                    [X(0.5417), 0.2510, 0], [X(0.5529), 0.2402, 0], [X(0.5432), 0.2292, 0],
+                    [X(0.5323), 0.2190, 0], [X(0.5263), 0.2239, 0], [X(0.5211), 0.2298, 0]
+                ]
+                const strap = Sweep({ input: Rect({ size: [0.036, 0.004] }), path, resolution: 6 })
+                const zs = []
+                for (let i = 0; i < 9; i++) zs.push([0, 0, -0.30 + i * 0.075])
+                return ApplyMaterial({ input: Place({ input: strap, positions: zs }), material: assets.strapLeather })
+            produces: MESHES
+        tuftedCushion:
+            doc: |
+                A rectangular button-tufted leather cushion built as a heightfield:
+                nearly flat panels, thin seam lines, button dishes with discs,
+                full borders and rounded edge shoulders.
+                Lies on XZ, base at Y=0, relief along +Y.
+            params:
+                sizeX: 0.49
+                sizeZ: 0.74
+                cellsX: 4
+                cellsZ: 5
+                maxPuff: 0.031
+                base: 0.055
+            render:
+                expression: |
+                    const PI = Math.PI
+                    const W = 150, H = 190
+                    const [u, v] = Coords({ shape: [H, W], normalize: true })
+                    const fu = u * params.cellsX
+                    const fv = v * params.cellsZ
+                    const cw = params.sizeX / params.cellsX
+                    const ch = params.sizeZ / params.cellsZ
+                    // Distance (m) to the nearest INTERIOR seam line per axis —
+                    // border panels stay high out to the cushion edge (no dip
+                    // where there is no button/seam).
+                    const ru = Clamp({ input: Round(fu), min: 1, max: params.cellsX - 1 })
+                    const rv = Clamp({ input: Round(fv), min: 1, max: params.cellsZ - 1 })
+                    const su = (fu - ru) * cw
+                    const sv = (fv - rv) * ch
+                    // Nearly flat panels with a very subtle crown.
+                    const dome = 0.94 + 0.06 * (Sin((fu - Floor(fu)) * PI) * Sin((fv - Floor(fv)) * PI)) ** 0.7
+                    // Thin piped seam lines (~5 mm) along the interior seams only.
+                    const seamLine = 0.16 * (Exp(-((su / 0.005) ** 2)) + Exp(-((sv / 0.005) ** 2)))
+                    // Local dish pulled down around each button (nowhere else —
+                    // the outer edges stay full since nothing holds them down).
+                    const r2 = su ** 2 + sv ** 2
+                    const dish = 0.5 * Exp(-(r2 / 0.0012))
+                    const base = dome - seamLine - dish
+                    // Button discs at the interior intersections.
+                    const btn = 0.58 * Exp(-((r2 / 0.0001) ** 1.5))
+                    const relief = Clamp({ input: Maximum({ input: base, other: btn }), min: 0, max: 1 })
+                    // Rounded shoulder along the outer edges: the top surface
+                    // rolls off in a quarter-round instead of a sharp 90 corner.
+                    const bdu = Minimum({ input: u, other: 1 - u }) * params.sizeX
+                    const bdv = Minimum({ input: v, other: 1 - v }) * params.sizeZ
+                    const bd = Minimum({ input: bdu, other: bdv })
+                    const t = Clamp({ input: bd / 0.02, min: 0, max: 1 })
+                    const shoulder = Sqrt(t * (2 - t))
+                    const field = Minimum({ input: relief, other: shoulder })
+                    return Heightmap({
+                        image: Image(field),
+                        size: [params.sizeX, params.sizeZ],
+                        maxHeight: params.maxPuff,
+                        baseThickness: params.base,
+                        resolution: [130, 160]
+                    })
+                produces: MESHES
+        seatCushion:
+            op: Transform
+            with:
+                rotate: [0, 0, -9.7]
+                translate: [-0.1078, 0.3018, 0]
+            input:
+                op: BakeMaterial
+                input:
+                    op: ApplyMaterial
+                    with:
+                        material:
+                            asset: leather
+                    input:
+                        use:
+                            asset: tuftedCushion
+                        with:
+                            sizeX: 0.573
+                            sizeZ: 0.74
+                            cellsX: 4
+                            cellsZ: 5
+                            maxPuff: 0.026
+                            base: 0.055
+        backCushion:
+            op: Transform
+            with:
+                rotate: [0, 0, 69.26]
+                translate: [0.2754, 0.5231, 0]
+            input:
+                op: BakeMaterial
+                input:
+                    op: ApplyMaterial
+                    with:
+                        material:
+                            asset: leather
+                    input:
+                        use:
+                            asset: tuftedCushion
+                        with:
+                            sizeX: 0.45
+                            sizeZ: 0.74
+                            cellsX: 4
+                            cellsZ: 5
+                            maxPuff: 0.026
+                            base: 0.055
+    render:
+        op: Transform
+        with:
+            rotate: [0, 180, 0]
+        input:
+            if:
+                param: show_cushions
+            then:
+                group:
+                  - asset: frame
+                  - asset: backStraps
+                  - asset: seatStraps
+                  - asset: seatCushion
+                  - asset: backCushion
+            else:
+                group:
+                  - asset: frame
+                  - asset: backStraps
+                  - asset: seatStraps
+debug_web.moon: |
+    moon: "1.0"
+    doc: |
+        Diagnostic: inspect the normals of the crossing web's fillet wall.
+        Rebuilds the web plate (as in main.moon), then samples all vertices
+        lying on the top R15 fillet arc wall and reports position angle,
+        actual normal, and deviation from the ideal radial normal.
+    render:
+        expression: |
+            const circle = o => Transform({ input: Circle({ radius: 0.0152, resolution: 256 }), translate: o })
+            const webs2d = Difference([
+                Polygon({ points: [
+                    [0.486286, 0.178345], [0.471266, 0.181763], [0.452519, 0.182001],
+                    [0.437816, 0.178466], [0.437514, 0.155055], [0.452534, 0.151637],
+                    [0.471281, 0.151399], [0.485984, 0.154934]
+                ] }),
+                circle([0.4955, 0.1667]), circle([0.4619, 0.1936]),
+                circle([0.4283, 0.1667]), circle([0.4619, 0.1398])
+            ])
+            const solid = Smooth({ input: Extrude({ input: webs2d, height: 0.030 }), subdivisions: 0, minSharpAngle: 45 })
+            const m = solid.meshes[0]
+            // Top fillet circle center (2D). Extruded: 2D (x, y) -> 3D (x, h, y).
+            const C = [0.4619, 0.1936]
+            const out = []
+            for (let i = 0; i < m.vertexCount; i++) {
+                const v = m.vertices[i]
+                const dx = v[0] - C[0], dz = v[2] - C[1]
+                const r = Math.sqrt(dx * dx + dz * dz)
+                if (Math.abs(r - 0.0152) > 0.0008) continue
+                const n = m.normals[i]
+                // ideal wall normal: horizontal, pointing toward the center
+                const ideal = [-dx / r, 0, -dz / r]
+                const dot = n[0] * ideal[0] + n[1] * ideal[1] + n[2] * ideal[2]
+                const ang = Math.atan2(dz, dx) * 180 / Math.PI
+                out.push({
+                    i,
+                    ang: Math.round(ang * 100) / 100,
+                    h: Math.round(v[1] * 1000) / 1000,
+                    nx: Math.round(n[0] * 1000) / 1000,
+                    ny: Math.round(n[1] * 1000) / 1000,
+                    nz: Math.round(n[2] * 1000) / 1000,
+                    dot: Math.round(dot * 1000) / 1000
+                })
+            }
+            out.sort((a, b) => (a.ang - b.ang) || (a.h - b.h))
+            return { meshCount: solid.length, vertexCount: m.vertexCount, samples: out }
+main.params.moon: |
+    moon: "1.0"
+    doc: |
+        Parameter override for ./main.moon
+    render:
+        use:
+            import: "./main.moon"
+        with: {}
+main.moon.webp: !!binary |
+    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
+    7/5FREsa4BrJqv0HRwUAAAAA
