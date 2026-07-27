@@ -1,0 +1,1418 @@
+# moons v1
+main.moon: |
+    moon: "1.0"
+    doc: |
+        DeLonghi Dedica EC685.M espresso machine — assembled from separately
+        modeled parts. Real-world scale (meters); machine is 14.9 cm wide,
+        30.4 cm tall, 33 cm deep. Included: main machine block, portafilter,
+        flush-fitting water tank, drip tray.
+        Machine front faces +Z (footprint z in [-0.165, +0.165], centered at X=0);
+        the portafilter handle points +Z. The main block (coffeemachine.moon) is
+        modeled in assembly coordinates: back face at z = -0.077, head front at
+        z = +0.105. The water tank hangs on the machine back, its curved rear
+        closing the machine depth at z = -0.165, its skirt seated directly on
+        the base top at y = 0.034. The drip tray sits on the ground at the machine
+        front, its rounded edge closing the depth at z = +0.165.
+        The tank stands open behind the machine back, accessible from the top;
+        its two outlet valves engage a receiver recessed flush into the base.
+        Base + body (0.248) + lid (0.022) close flush with the machine top at
+        0.304; the lid's fully inset D-profile continues the machine's 15 mm
+        chamfer directly through the top seam and around the rounded rear. The drip
+        tray slides over the low base platform; the full-height black base ends at
+        the column face, where the tray's stainless rear tongue meets the steel. The head overhangs to z = +0.163 with its group head centered
+        at z = 0.097, 10 mm rearward for a more central placement and directly over
+        the matching tray cup holes. The portafilter is locked
+        into the group head, with its handle extending toward the user along +Z.
+    assets:
+        machine:
+            use:
+                import: ./coffeemachine.moon
+        portafilter:
+            op: Transform
+            with:
+                rotate: [0, -90, 0]
+                translate: [0, 0.132, 0.097]
+            input:
+                use:
+                    import: ./portafilter.moon
+        watertank:
+            op: Transform
+            with:
+                translate: [0, 0.034, -0.107]
+            input:
+                use:
+                    import: ./watertank.moon
+        driptray:
+            op: Transform
+            with:
+                translate: [0, 0, 0.028]
+            input:
+                use:
+                    import: ./driptray.moon
+    render:
+        group:
+          - asset: machine
+          - asset: portafilter
+          - asset: watertank
+          - asset: driptray
+coffeemachine.moon: |
+    moon: "1.0"
+    doc: |
+        DeLonghi Dedica EC685.M main machine block, real-world scale (meters).
+        Front faces +Z, X centered, ground at Y=0. Machine back (water-tank
+        mating face) at z = -0.077; the tank stands behind, open and
+        accessible from the top. The head overhangs forward to z = +0.163,
+        its front a broad elliptical arc matching the drip tray's front
+        rounding; the group head hangs at z = 0.097, exactly over the tray's
+        cup holes. The black base (2 mm proud of the steel column) is a single
+        flush slab, one piece with its top at one level (y = 0.034) from the
+        rounded rear at z = -0.165 to z = +0.028, ending exactly at the steel
+        column front where the drip tray docks — no exposed full-height spacer;
+        the steel column emerges from
+        its top. Two things break the flush top: in front a separate low
+        platform (24 mm) inside the tray's underside hollow lets the tray slide
+        on from the front, and at the back a recessed drum carries the two-port
+        receiver plate flush with the base top at y = 0.034. The tank skirt rests
+        directly on that same base surface.
+        Height 30.4 cm, width 14.9 cm.
+        Parts: single-piece black plastic base slab (flush top, front tray
+        platform, rear tank-receiver drum), brushed-steel column, overhanging brushed
+        head with rounded front, polished chrome top: a wide ~2 cm 45-deg chamfer
+        rising flush from the body on the front and sides frames a recessed
+        cup-warming grille whose ribs run across the width; the back has no rim or
+        chamfer — it stays flat, flush with the tray, meeting the water tank
+        cleanly. Three small chrome-ringed black buttons in an arc sit on the
+        front chamfer; chrome group-head funnel
+        with a brushed bayonet lock ring (three entry slots into an internal
+        groove; front "insert" mark — twist the portafilter ~30 deg to lock),
+        DeLonghi front plaque, chrome steam
+        knob (a one-piece chrome part on the right side face — a round domed knob
+        with a thin flat forward-pointing handle you grip to turn) and a steam
+        wand at the front-right carried out on a thin
+        chrome elbow arm that projects it out to the side — black pivot,
+        selector collar and steel tube hang clear of the body so a cup fits under.
+        Water tank, portafilter and drip tray are separate files; assembly
+        happens in main.moon.
+    params:
+        width:
+            default: 0.149
+            doc: |
+                Overall machine width (X), meters.
+            min: 0.12
+            max: 0.18
+        resolution:
+            default: 72
+            min: 16
+            max: 128
+    assets:
+        steel:
+            op: Material
+            with:
+                color: [0.72, 0.72, 0.73, 1]
+                roughness: 0.35
+                metallic: 1
+        chrome:
+            op: Material
+            with:
+                color: [0.92, 0.92, 0.94, 1]
+                roughness: 0.07
+                metallic: 1
+        black:
+            op: Material
+            with:
+                color: [0.06, 0.06, 0.06, 1]
+                roughness: 0.45
+        blackGloss:
+            op: Material
+            with:
+                color: [0.035, 0.035, 0.04, 1]
+                roughness: 0.12
+        basePlastic:
+            op: Material
+            with:
+                color: [0.025, 0.025, 0.028, 1]
+                roughness: 0.62
+        headPlan:
+            expression: |
+                const w = params.width, fr = 0.048
+                const zB = -0.077, zF = 0.163
+                const back = Transform({
+                    input: Rect({ size: [w, (zF - fr) - zB], anchor: [0.5, 0] }),
+                    translate: [0, zB]
+                })
+                const front = Transform({
+                    input: Ellipse({ radii: [w / 2, fr], resolution: params.resolution }),
+                    translate: [0, zF - fr]
+                })
+                return Union([back, front])
+            produces: POLYGONS
+        basePlan:
+            expression: |
+                const w = params.width + 0.004, r = 0.05
+                const zB = -0.165, zF = 0.028
+                const front = Transform({
+                    input: Rect({ size: [w, zF - (zB + r)], anchor: [0.5, 0] }),
+                    translate: [0, zB + r]
+                })
+                const corner = x => Transform({
+                    input: Circle({ radius: r, resolution: params.resolution }),
+                    translate: [x, zB + r]
+                })
+                return Hull(Group([front, corner(w / 2 - r), corner(-w / 2 + r)]))
+            produces: POLYGONS
+        # Single flush black base: one solid slab, no stacked riser. Its top sits
+        # at one level (y = 0.034) across the whole footprint, from the rounded
+        # rear (z = -0.165) to the column/tray seam (z = +0.028), so the base
+        # reads as one piece, flush from front to back. The steel column sits
+        # directly on its y=0.034 top surface without overlap; the only things
+        # breaking the flush top are the rear tank-receiver drum and, in front,
+        # the separate low tray platform.
+        base:
+            expression: |
+                // Open a shallow rear receiver pocket through the base top. The
+                // tank's twin valves descend into the two wells carried by the
+                // receiver plate below; the surrounding tank skirt still rests on
+                // the uninterrupted y=0.034 base surface.
+                const slab = Extrude({ input: assets.basePlan, height: 0.034 })
+                const receiverPocket = Transform({
+                    input: Extrude({
+                        input: Rect({ size: [0.060, 0.034], anchor: [0.5, 0.5],
+                                      cornerRadius: [0.015, 0.015], resolution: 48 }),
+                        height: 0.012
+                    }),
+                    translate: [0, 0.028, -0.108]
+                })
+                return ApplyMaterial({
+                    input: Difference([slab, receiverPocket]),
+                    material: assets.basePlastic
+                })
+            produces: MESHES
+        trayPlatform:
+            expression: |
+                // Low platform that the drip tray slides over from the front: fits the
+                // tray's underside hollow (inner half-width 0.071, ceiling 0.026),
+                // with a cutout for the tray's central basin tub (which reaches
+                // down to 5 mm above ground) at world z 0.057..0.139.
+                const outline = Union([
+                    Transform({
+                        input: Rect({ size: [0.136, 0.087], anchor: [0.5, 0] }),
+                        translate: [0, 0.028]
+                    }),
+                    Transform({
+                        input: Ellipse({ radii: [0.068, 0.044], resolution: params.resolution }),
+                        translate: [0, 0.115]
+                    })
+                ])
+                const basinCut = Transform({
+                    input: Rect({ size: [0.088, 0.086], anchor: [0.5, 0], cornerRadius: [0.022, 0.022], resolution: 48 }),
+                    translate: [0, 0.057]
+                })
+                // The basin recess keeps a thin closed floor sheet (3 mm) at the
+                // very bottom instead of a see-through hole: the cutter starts at
+                // y = 0.003. The tray's basin tub (floor at 5 mm) clears it.
+                const platform = Difference([
+                    Extrude({ input: outline, height: 0.024 }),
+                    Transform({
+                        input: Extrude({ input: basinCut, height: 0.03 }),
+                        translate: [0, 0.003, 0]
+                    })
+                ])
+                return ApplyMaterial({ input: platform, material: assets.basePlastic })
+            produces: MESHES
+        tankPedestal:
+            expression: |
+                // Recessed drum at the back carries the two-port receiver plate
+                // (wells + centre pin) flush with the base top at y = 0.034.
+                // The tank skirt lands directly on the surrounding base.
+                const res = params.resolution
+                const w = 0.137, r = 0.044
+                const back = Transform({
+                    input: Rect({ size: [w, 0.044], anchor: [0.5, 0] }),
+                    translate: [0, -0.119]
+                })
+                const corner = x => Transform({
+                    input: Circle({ radius: r, resolution: res }),
+                    translate: [x, -0.115]
+                })
+                const outline = Hull(Group([back, corner(w / 2 - r), corner(-w / 2 + r)]))
+                const drum = Extrude({ input: outline, height: 0.022 })
+                const plate = Extrude({
+                    input: Transform({
+                        input: Rect({ size: [0.058, 0.032], anchor: [0.5, 0.5], cornerRadius: [0.015, 0.015], resolution: 48 }),
+                        translate: [0, -0.108]
+                    }),
+                    height: 0.0035
+                })
+                const ring = x => Cylinder({ height: 0.004, radiusLow: 0.0105, resolution: res, anchor: [0.5, 0, 0.5] })
+                const rings = [-0.0145, 0.0145].map(x => Transform({ input: ring(x), translate: [x, 0.022, -0.108] }))
+                const holes = [-0.0145, 0.0145].map(x => Transform({
+                    input: Cylinder({ height: 0.03, radiusLow: 0.0055, resolution: res }),
+                    translate: [x, 0.02, -0.108]
+                }))
+                const pin = Transform({
+                    input: Cylinder({ height: 0.0075, radiusLow: 0.0035, resolution: res, anchor: [0.5, 0, 0.5] }),
+                    translate: [0, 0.0185, -0.108]
+                })
+                const top = Difference([
+                    Union([Transform({ input: plate, translate: [0, 0.0215, 0] }), ...rings]),
+                    ...holes
+                ])
+                return ApplyMaterial({
+                    input: Transform({ input: Group([drum, Group([top, pin])]), translate: [0, 0.008, 0] }),
+                    material: assets.basePlastic
+                })
+            produces: MESHES
+        column:
+            pipe:
+              - op: Box
+                with:
+                    size: [0.149, 0.19, 0.105]
+                    anchor: [0.5, 0, 0.5]
+              - op: Transform
+                with:
+                    translate: [0, 0.034, -0.0245]
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: steel
+        headBody:
+            pipe:
+              - op: Extrude
+                with:
+                    height: 0.073
+                input:
+                    asset: headPlan
+              - op: Transform
+                with:
+                    translate: [0, 0.215, 0]
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: steel
+        headTrim:
+            pipe:
+              - op: Offset
+                with:
+                    delta: -0.001
+                input:
+                    asset: headPlan
+              - op: Extrude
+                with:
+                    height: 0.007
+              - op: Transform
+                with:
+                    translate: [0, 0.209, 0]
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: chrome
+        topGrille:
+            expression: |
+                // Polished chrome top. The chamfer starts FLUSH from the main body
+                // top edge (bottom outline = the body outline, no step) and runs a
+                // full ~2 cm at 45 deg on the FRONT and SIDES up to the top plane.
+                // The BACK stays vertical/flush for the water tank: the top outline
+                // keeps the body's full-width back edge there, so the loft is vertical.
+                // The recessed cup-warming grille (ribs across the width, X) sits
+                // inside, below the rim.
+                const plan = assets.headPlan
+                const zBack = -0.077
+                const y0 = 0.288
+                const cham = 0.015                    // 45 deg: rise = inset = 0.015 (~2.1 cm slope)
+                const topY = y0 + cham                // 0.303
+                const floorY = topY - 0.004           // recess floor, 4 mm below the rim
+                const rim = 0.004                     // flat rim between chamfer and grille
+                // Build matching outlines directly so no boolean seam can cut either
+                // rear corner. The rear edge stays full width at both heights; only the
+                // side edges move inward, beginning just forward of the back plane.
+                const w = params.width
+                const frontCenter = 0.115
+                const frontRadius = 0.048
+                const innerX = w / 2 - cham
+                const innerFrontRadius = frontRadius - cham
+                const arcSteps = Math.max(12, Math.floor(params.resolution / 2))
+                const bottomPoints = [
+                    [-w / 2, zBack], [w / 2, zBack],
+                    [w / 2, zBack + cham], [w / 2, frontCenter]
+                ]
+                const topPoints = [
+                    [-innerX, zBack], [innerX, zBack],
+                    [innerX, zBack + cham], [innerX, frontCenter]
+                ]
+                for (let i = 1; i <= arcSteps; i++) {
+                    const a = Math.PI * i / arcSteps
+                    bottomPoints.push([w / 2 * Math.cos(a), frontCenter + frontRadius * Math.sin(a)])
+                    topPoints.push([innerX * Math.cos(a), frontCenter + innerFrontRadius * Math.sin(a)])
+                }
+                bottomPoints.push([-w / 2, zBack + cham])
+                topPoints.push([-innerX, zBack + cham])
+                const bottomSection = Transform({
+                    input: Extrude({ input: Polygon({ points: bottomPoints }), height: 0.0002 }),
+                    translate: [0, y0, 0]
+                })
+                const topSection = Transform({
+                    input: Extrude({ input: Polygon({ points: topPoints }), height: 0.0002 }),
+                    translate: [0, topY - 0.0002, 0]
+                })
+                const cap = Hull(Group([bottomSection, topSection]))
+                // Recessed tray: cut an inset pocket down to the floor.
+                const gInset = cham + rim
+                const aX = 0.0745 - gInset, bZ = 0.048 - gInset
+                const rearMargin = 0.003
+                const insetPlan = Offset({ input: plan, delta: -gInset })
+                const grillePlan = Union([
+                    insetPlan,
+                    Transform({
+                        input: Rect({
+                            size: [2 * aX, gInset - rearMargin + 0.002],
+                            anchor: [0.5, 0]
+                        }),
+                        translate: [0, zBack + rearMargin]
+                    })
+                ])
+                const pocket = Transform({
+                    input: Extrude({ input: grillePlan, height: 0.02 }),
+                    translate: [0, floorY, 0]
+                })
+                const body = Difference([cap, pocket])
+                // Continuous recessed warming plate beneath the embossed ribs, now
+                // reaching to within 3 mm of the machine back.
+                const grilleFloor = Transform({
+                    input: Extrude({ input: grillePlan, height: 0.002 }),
+                    translate: [0, floorY - 0.002, 0]
+                })
+                // Grille ribs across the width: long in X, thin in Z, on the floor.
+                const halfX = z => {
+                    if (z <= 0.115) return aX
+                    const t = (z - 0.115) / bZ
+                    return t * t < 1 ? aX * Math.sqrt(1 - t * t) : 0
+                }
+                const ribs = []
+                for (let z = zBack + 0.005; z <= 0.140; z += 0.008) {
+                    const hx = halfX(z)
+                    if (hx < 0.007) continue
+                    ribs.push(Transform({
+                        input: Box({ size: [2 * hx, 0.0025, 0.005], anchor: [0.5, 0, 0.5] }),
+                        translate: [0, floorY, z]
+                    }))
+                }
+                return ApplyMaterial({ input: Group([body, grilleFloor, ...ribs]), material: assets.chrome })
+            produces: MESHES
+        buttons:
+            expression: |
+                // Three control buttons sitting ON the front chamfer, in an arc
+                // following the rounded front. Each is a polished chrome bezel ring
+                // around a slightly recessed black-gloss face, lying flat on the
+                // 45-deg bevel (facing up + outward).
+                const res = params.resolution
+                const yc = 0.2955, tilt = 45                // mid-height of the chamfer
+                const button = px => {
+                    const arc = Math.sqrt(Math.max(0, 1 - (px / 0.0745) ** 2))
+                    const qz = 0.115 + 0.048 * arc - 0.0075 // onto the chamfer mid-surface
+                    let nx = px / (0.0745 * 0.0745), nz = (qz - 0.115) / (0.048 * 0.048)
+                    const nl = Math.hypot(nx, nz); nx /= nl; nz /= nl
+                    const yaw = Math.atan2(nx, nz) * 180 / Math.PI
+                    const ring = ApplyMaterial({
+                        input: Difference([
+                            Cylinder({ height: 0.005, radiusLow: 0.0092, resolution: res }),
+                            Cylinder({ height: 0.02, radiusLow: 0.0072, resolution: res })
+                        ]),
+                        material: assets.chrome
+                    })
+                    const face = ApplyMaterial({
+                        input: Cylinder({ height: 0.007, radiusLow: 0.0082, resolution: res }),
+                        material: assets.blackGloss
+                    })
+                    return Transform({
+                        input: Group([ring, face]),
+                        rotate: [tilt, yaw, 0],
+                        translate: [px, yc, qz]
+                    })
+                }
+                return Group([-0.040, 0, 0.040].map(button))
+            produces: MESHES
+        groupHead:
+            expression: |
+                // A real bayonet lock, not three push-through holes. The
+                // portafilter's three lugs (60/180/300 deg, reaching R = 0.0435)
+                // are offered up rotated to the entry slots, then the whole
+                // portafilter is twisted ~30 deg toward the front to tighten:
+                // the lugs ride off the entry gaps and hook UNDER a solid bottom
+                // rim, trapped in an internal groove. Everything stays inside a
+                // solid ~2 mm outer wall, so the exterior funnel is smooth — the
+                // slots are only visible looking straight up the mouth, never from
+                // the outside. Cross-section (r, y):
+                //   outer wall R = 0.046; bore R = 0.0365 (bowl clearance);
+                //   a groove out to R = 0.044 at y 0.004..0.014 where the lugs
+                //   sit; a bottom rim reaching in to R = 0.038 that they hook under.
+                const z = 0.097, res = params.resolution
+                const bell = Transform({
+                    input: Cylinder({ height: 0.02, radiusLow: 0.049, radiusHigh: 0.054, resolution: res, anchor: [0.5, 0, 0.5] }),
+                    translate: [0, 0.197, z]
+                })
+                const ringProfile = Polygon({ points: [
+                    [0.046, 0],           // outer wall, bottom
+                    [0.046, 0.034],       // outer wall, top
+                    [0.0365, 0.034],      // bore, top (open through to the shower)
+                    [0.0365, 0.014],      // bore, down to the groove ceiling
+                    [0.044, 0.014],       // step out: groove ceiling (limits lug rise)
+                    [0.044, 0.004],       // groove outer wall, down to the rim
+                    [0.038, 0.004],       // step in: rim top face (the lugs rest here)
+                    [0.038, 0],           // rim inner edge, down to the bottom
+                ] })
+                const ringBody = Revolve({ input: ringProfile, resolution: res })
+                // Three entry slots cut through the rim only (r 0.036..0.044),
+                // 120 deg apart; the outer wall (0.044..0.046, ~2 mm) stays closed,
+                // so no slot is visible from outside. Twist to lock brings each lug
+                // off its slot and under the intact rim.
+                const slotCut = a => Transform({
+                    input: Transform({
+                        input: Box({ size: [0.026, 0.007, 0.008], anchor: [0.5, 0.5, 0.5] }),
+                        translate: [0, 0.0015, 0.040]
+                    }),
+                    rotate: [0, a, 0]
+                })
+                let ring = Difference([ringBody, slotCut(90), slotCut(210), slotCut(330)])
+                ring = Transform({ input: ring, translate: [0, 0.170, z] })
+                // "Insert" alignment mark: a small down-pointing triangle on the
+                // front of the ring you line the portafilter up with before twisting.
+                const insertMark = ApplyMaterial({
+                    input: Transform({
+                        input: Extrude({
+                            input: Polygon({ points: [[-0.005, 0.007], [0.005, 0.007], [0, 0]] }),
+                            height: 0.0016
+                        }),
+                        rotate: [-90, 0, 0],
+                        translate: [0, 0.182, z + 0.0476]
+                    }),
+                    material: assets.blackGloss
+                })
+                const shower = Transform({
+                    input: Cylinder({ height: 0.005, radiusLow: 0.033, resolution: res, anchor: [0.5, 0, 0.5] }),
+                    translate: [0, 0.194, z]
+                })
+                const screen = Transform({
+                    input: Cylinder({ height: 0.004, radiusLow: 0.024, resolution: res, anchor: [0.5, 0, 0.5] }),
+                    translate: [0, 0.1915, z]
+                })
+                return Group([
+                    ApplyMaterial({ input: bell, material: assets.chrome }),
+                    ApplyMaterial({ input: ring, material: assets.steel }),
+                    ApplyMaterial({ input: shower, material: assets.blackGloss }),
+                    ApplyMaterial({ input: screen, material: assets.steel }),
+                    insertMark
+                ])
+            produces: MESHES
+        plaque:
+            expression: |
+                // Curved badge: a thin shell following the head's front ellipse,
+                // trimmed to a rounded-rect outline projected along +Z.
+                const shell = (dOut, dIn) => Difference([
+                    Transform({
+                        input: Extrude({ input: Offset({ input: assets.headPlan, delta: dOut }), height: 0.05 }),
+                        translate: [0, 0.221, 0]
+                    }),
+                    Transform({
+                        input: Extrude({ input: Offset({ input: assets.headPlan, delta: dIn }), height: 0.07 }),
+                        translate: [0, 0.211, 0]
+                    })
+                ])
+                const outline = (wx, hy, cr) => Transform({
+                    input: Extrude({
+                        input: Rect({ size: [wx, hy], cornerRadius: [cr, cr], resolution: 48 }),
+                        height: 0.06
+                    }),
+                    rotate: [90, 0, 0],
+                    translate: [0, 0.246, 0.12]
+                })
+                return Group([
+                    ApplyMaterial({
+                        input: Intersection([shell(0.0035, 0.0), outline(0.048, 0.0145, 0.006)]),
+                        material: assets.chrome
+                    }),
+                    ApplyMaterial({
+                        input: Intersection([shell(0.002, -0.001), outline(0.043, 0.011, 0.0045)]),
+                        material: assets.blackGloss
+                    })
+                ])
+            produces: MESHES
+        steamKnob:
+            expression: |
+                // Chrome steam/hot-water selector matching the real EC685 control:
+                // a shallow circular mounting boss on the right panel, covered by a
+                // tall rounded rectangular paddle, with a short thumb tab flowing
+                // forward (+Z). The control projects outward along +X.
+                const res = params.resolution
+                const x0 = params.width / 2
+                const yc = 0.252, zc = 0.056
+                // Shallow round escutcheon against the side panel, axis along +X.
+                const boss = Transform({
+                    input: Cylinder({ height: 0.006, radiusLow: 0.012,
+                                      resolution: res, anchor: [0.5, 0, 0.5] }),
+                    rotate: [0, 0, -90]
+                })
+                // Clearly round domed knob, flattened only along its rotation axis.
+                const roundKnob = Transform({
+                    input: Sphere({ radius: 0.015, resolution: res }),
+                    scale: [0.68, 1, 1],
+                    translate: [0.011, 0, 0]
+                })
+                // Distinct short paddle handle projecting toward the user/front (+Z).
+                // It overlaps the round knob at its root but keeps parallel sides and
+                // a softly rounded free end, like the real selector lever.
+                const paddleHandle = Transform({
+                    input: RoundedBox({ size: [0.018, 0.012, 0.028],
+                                        radius: 0.0045, resolution: 16 }),
+                    translate: [0.011, 0, 0.0175]
+                })
+                const knobPiece = Transform({
+                    input: Union([boss, roundKnob, paddleHandle]),
+                    translate: [x0, yc, zc]
+                })
+                return ApplyMaterial({ input: knobPiece, material: assets.chrome })
+            produces: MESHES
+        steamWand:
+            expression: |
+                const res = 32
+                // A chrome elbow arm carries the wand OUT TO THE SIDE (+X) off the
+                // right of the machine (like the original), so the wand hangs beside
+                // the body, clear of it, and a cup fits underneath. The arm runs from
+                // inside the head front-right (base) sideways to the pivot ball; the
+                // black selector collar and the steel wand tube hang down from there.
+                const base = [0.050, 0.216, 0.065]     // arm root, embedded in the head
+                const pivot = [0.086, 0.206, 0.068]    // outboard elbow / ball-joint centre, out to the side
+                // Depth-wise the wand sits BETWEEN the group head (z = 0.097) and the
+                // main body front (column face at z = 0.028), not level with the head.
+                const arm = ApplyMaterial({
+                    input: Sweep({
+                        input: Circle({ radius: 0.004, resolution: res }),
+                        path: [base, pivot]
+                    }),
+                    material: assets.chrome
+                })
+                const ball = ApplyMaterial({
+                    input: Transform({ input: Sphere({ radius: 0.012, resolution: res }), translate: pivot }),
+                    material: assets.black
+                })
+                // collar + tube + nozzle, built about the origin (collar top at y=0),
+                // then tilted slightly forward and hung from the pivot.
+                const collar = ApplyMaterial({
+                    input: Cylinder({ height: 0.038, radiusLow: 0.0115, resolution: res, anchor: [0.5, 1, 0.5] }),
+                    material: assets.black
+                })
+                const tube = ApplyMaterial({
+                    input: Transform({
+                        input: Cylinder({ height: 0.085, radiusLow: 0.0062, resolution: res, anchor: [0.5, 1, 0.5] }),
+                        translate: [0, -0.032, 0]
+                    }),
+                    material: assets.steel
+                })
+                const tip = ApplyMaterial({
+                    input: Transform({
+                        input: Cylinder({ height: 0.010, radiusLow: 0.007, resolution: res, anchor: [0.5, 1, 0.5] }),
+                        translate: [0, -0.115, 0]
+                    }),
+                    material: assets.black
+                })
+                const hanging = Transform({
+                    input: Group([collar, tube, tip]),
+                    rotate: [2, 0, -8],
+                    translate: pivot
+                })
+                return Group([arm, ball, hanging])
+            produces: MESHES
+    render:
+        group:
+          - asset: base
+          - asset: trayPlatform
+          - asset: tankPedestal
+          - asset: column
+          - asset: headBody
+          - asset: headTrim
+          - asset: topGrille
+          - asset: buttons
+          - asset: groupHead
+          - asset: plaque
+          - asset: steamKnob
+          - asset: steamWand
+driptray.moon: |
+    moon: "1.0"
+    doc: |
+        DeLonghi Dedica EC685 drip tray, real-world scale in meters.
+        Plan shape: straight back edge, straight parallel sides, broad
+        elliptical arc only at the front. Black glossy plastic basin with a
+        red water-level float inside; on top an unbranded polished stainless
+        cover plate running flush to the back edge, with a down-turned skirt,
+        two large cup holes, one small hole and the level-indicator slot in
+        front of (below) the round holes — all with raised stamped rims.
+        The underside is a tall U-shaped hollow: the outer wall (sides and
+        front) reaches the ground, the hollow extends up to a thin top deck
+        and is open through the back edge, so the tray slides from the front
+        over the machine's base. Only the central basin tub — where water
+        and coffee drip — goes down (floor 5 mm above ground); its underside
+        carries two hollow oval bosses and a hook boss that engage the
+        machine base (appearing as posts inside the basin).
+        Origin: X centered; base (ground rim) at Y=0; back flat edge at
+        z = 0, front-most point at z = depth (plate overhangs +1 mm).
+        Plate top surface = trayHeight + 2 mm.
+    params:
+        width:
+            default: 0.148
+            doc: |
+                Overall tray width (X), meters.
+            min: 0.10
+            max: 0.16
+        depth:
+            default: 0.136
+            doc: |
+                Overall tray depth (Z), back flat edge to front of curve.
+            min: 0.08
+            max: 0.15
+        frontRadius:
+            default: 0.048
+            doc: |
+                Depth of the elliptical front arc; the sides are straight
+                up to depth - frontRadius.
+            min: 0.02
+            max: 0.07
+        trayHeight:
+            default: 0.030
+            doc: |
+                Height of the black basin walls.
+            min: 0.02
+            max: 0.05
+        wall:
+            default: 0.003
+            doc: |
+                Basin wall thickness.
+            min: 0.0015
+            max: 0.006
+        resolution:
+            default: 64
+            min: 16
+            max: 128
+    assets:
+        blackPlastic:
+            op: Material
+            with:
+                color: [0.05, 0.05, 0.055, 1]
+                roughness: 0.35
+        polishedSteel:
+            op: Material
+            with:
+                color: [0.88, 0.89, 0.90, 1]
+                roughness: 0.13
+                metallic: 1
+        redPlastic:
+            op: Material
+            with:
+                color: [0.82, 0.07, 0.05, 1]
+                roughness: 0.3
+        outline:
+            doc: |
+                Plan outline: straight back edge at y2d = 0, straight sides,
+                broad elliptical arc across the front. 2D y maps to 3D Z.
+            expression: |
+                const w = params.width
+                const fr = params.frontRadius
+                const back = Rect({
+                    size: [w, params.depth - fr],
+                    anchor: [0.5, 0],
+                    cornerRadius: [0.006, 0.006],
+                    resolution: params.resolution
+                })
+                const front = Transform({
+                    input: Ellipse({ radii: [w / 2, fr], resolution: params.resolution }),
+                    translate: [0, params.depth - fr]
+                })
+                return Union([back, front])
+            produces: POLYGONS
+        blackBody:
+            doc: |
+                U-shaped hollow shell (open at the back, up to a thin top
+                deck) with a central basin tub reaching down; the basin
+                underside carries two hollow oval bosses and a hook boss.
+            expression: |
+                const h = params.trayHeight
+                const w = params.width
+                const res = params.resolution
+                const wall = params.wall
+                const deck = 0.004
+                const outer = Extrude({ input: assets.outline, height: h })
+                // tall underside hollow up to the deck, open through the back
+                const underShape = Union([
+                    Offset({ input: assets.outline, delta: -wall }),
+                    Transform({
+                        input: Rect({ size: [w - 2 * wall, 0.030], anchor: [0.5, 0] }),
+                        translate: [0, -0.025]
+                    })
+                ])
+                let tray = Difference([outer, Extrude({ input: underShape, height: h - deck })])
+                // central basin tub — the only part reaching down (floor 5 mm above ground)
+                const basinShape = Transform({
+                    input: Rect({
+                        size: [0.084, 0.082],
+                        anchor: [0.5, 0],
+                        cornerRadius: [0.020, 0.020],
+                        resolution: res
+                    }),
+                    translate: [0, 0.029]
+                })
+                tray = Union([tray, Transform({
+                    input: Extrude({ input: basinShape, height: h - 0.005 }),
+                    translate: [0, 0.005, 0]
+                })])
+                // water cavity, open to the top
+                tray = Difference([tray, Transform({
+                    input: Extrude({ input: Offset({ input: basinShape, delta: -wall }), height: h }),
+                    translate: [0, 0.008, 0]
+                })])
+                // molded engagement bosses on the basin floor, hollow from below
+                const stadium = (sx, sz, x, z) => Transform({
+                    input: Rect({
+                        size: [sx, sz],
+                        cornerRadius: [Math.min(sx, sz) / 2, Math.min(sx, sz) / 2],
+                        resolution: 32
+                    }),
+                    translate: [x, z]
+                })
+                const bosses = []
+                const pockets = []
+                for (const [x, z] of [[-0.019, 0.063], [0.019, 0.063]]) {
+                    bosses.push(Transform({
+                        input: Extrude({ input: stadium(0.017, 0.024, x, z), height: 0.014 }),
+                        translate: [0, 0.006, 0]
+                    }))
+                    pockets.push(Transform({
+                        input: Extrude({ input: stadium(0.013, 0.020, x, z), height: 0.014 }),
+                        translate: [0, 0.002, 0]
+                    }))
+                }
+                bosses.push(Transform({
+                    input: Extrude({ input: stadium(0.022, 0.014, 0, 0.081), height: 0.010 }),
+                    translate: [0, 0.006, 0]
+                }))
+                pockets.push(Transform({
+                    input: Box({ size: [0.014, 0.010, 0.008] }),
+                    translate: [0, 0.006, 0.081]
+                }))
+                tray = Union([tray, ...bosses])
+                return Difference([tray, ...pockets])
+            produces: MESHES
+        levelFloat:
+            doc: |
+                Red stadium-shaped float with a thin fin, aligned under the
+                indicator slot.
+            expression: |
+                const stadium = Transform({
+                    input: Rect({
+                        size: [0.032, 0.014],
+                        cornerRadius: [0.007, 0.007],
+                        resolution: 32
+                    }),
+                    translate: [-0.002, 0.090]
+                })
+                const body = Extrude({ input: stadium, height: 0.011 })
+                const fin = Transform({
+                    input: Box({ size: [0.020, 0.005, 0.003] }),
+                    translate: [-0.002, 0.011 + 0.0025, 0.090]
+                })
+                return Transform({ input: Union([body, fin]), translate: [0, 0.012, 0] })
+            produces: MESHES
+        coverPlate:
+            doc: |
+                Unbranded stamped stainless plate: 1.5 mm sheet with a 7 mm
+                down-turned skirt, raised rims around the two large cup
+                holes, the small hole and the indicator slot in front of the
+                round holes; all openings cut through.
+            expression: |
+                const t = 0.0015
+                const skirtH = 0.007
+                const res = params.resolution
+                const plateOutline = Offset({ input: assets.outline, delta: 0.001 })
+                // Stainless rear tongue slides beneath the steel column face. It
+                // conceals the otherwise exposed black platform at the junction,
+                // making the visible metal surfaces meet without a dark spacer.
+                const rearTongue = Transform({
+                    input: Rect({ size: [params.width + 0.002, 0.022], anchor: [0.5, 1] }),
+                    translate: [0, 0]
+                })
+                const outline = Union([plateOutline, rearTongue])
+                let shell = Difference([
+                    Extrude({ input: outline, height: skirtH }),
+                    Extrude({
+                        input: Offset({ input: outline, delta: -t }),
+                        height: skirtH - t
+                    })
+                ])
+                // round holes: [x, z, radius] — two large cup holes, one small
+                const holes = [[-0.021, 0.069, 0.012], [0.017, 0.069, 0.012], [0.050, 0.066, 0.0055]]
+                const slot = Transform({
+                    input: Rect({
+                        size: [0.034, 0.009],
+                        cornerRadius: [0.0045, 0.0045],
+                        resolution: res
+                    }),
+                    translate: [-0.002, 0.090]
+                })
+                // raised stamped rims (solid; cores get cut below)
+                const rims = holes.map(([x, z, r]) => Transform({
+                    input: Cylinder({
+                        height: 0.004, radiusLow: r + 0.0025,
+                        resolution: res, anchor: [0.5, 0, 0.5]
+                    }),
+                    translate: [x, skirtH - 0.002, z]
+                }))
+                rims.push(Transform({
+                    input: Extrude({
+                        input: Offset({ input: slot, delta: 0.0025 }),
+                        height: 0.004
+                    }),
+                    translate: [0, skirtH - 0.002, 0]
+                }))
+                shell = Union([shell, ...rims])
+                // cut the openings through plate and rims
+                const cutters = holes.map(([x, z, r]) => Transform({
+                    input: Cylinder({
+                        height: 0.04, radiusLow: r,
+                        resolution: res, anchor: [0.5, 0.5, 0.5]
+                    }),
+                    translate: [x, skirtH / 2, z]
+                }))
+                cutters.push(Transform({
+                    input: Extrude({ input: slot, height: 0.04 }),
+                    translate: [0, -0.02, 0]
+                }))
+                shell = Difference([shell, ...cutters])
+                return Transform({
+                    input: shell,
+                    translate: [0, params.trayHeight + 0.002 - skirtH, 0]
+                })
+            produces: MESHES
+    render:
+        group:
+          - op: ApplyMaterial
+            with:
+                material:
+                    asset: blackPlastic
+            input:
+                asset: blackBody
+          - op: ApplyMaterial
+            with:
+                material:
+                    asset: redPlastic
+            input:
+                asset: levelFloat
+          - op: ApplyMaterial
+            with:
+                material:
+                    asset: polishedSteel
+            input:
+                asset: coverPlate
+portafilter.moon: |
+    moon: "1.0"
+    doc: |
+        DeLonghi Dedica EC685 portafilter (51 mm), real-world scale in meters.
+        Origin: bowl axis at X=0/Z=0, bowl bottom at Y=0, cup opening facing +Y.
+        Handle extends along +X. Overall length ~20 cm.
+    params:
+        bowlRadius:
+            default: 0.035
+            doc: |
+                Outer radius of the bowl (head), meters.
+            min: 0.02
+            max: 0.06
+        bowlHeight:
+            default: 0.05
+            min: 0.03
+            max: 0.08
+        handleLength:
+            default: 0.095
+            min: 0.08
+            max: 0.2
+        handleRadius:
+            default: 0.0155
+            min: 0.01
+            max: 0.025
+        resolution:
+            default: 64
+            doc: |
+                Segments per full circle for curved parts.
+            min: 16
+            max: 128
+    assets:
+        aluminum:
+            op: Material
+            with:
+                color: [0.8, 0.81, 0.83, 1]
+                roughness: 0.4
+                metallic: 1
+        steel:
+            op: Material
+            with:
+                color: [0.87, 0.88, 0.9, 1]
+                roughness: 0.3
+                metallic: 1
+        chrome:
+            op: Material
+            with:
+                color: [0.92, 0.92, 0.94, 1]
+                roughness: 0.08
+                metallic: 1
+        blackPlastic:
+            op: Material
+            with:
+                color: [0.04, 0.04, 0.04, 1]
+                roughness: 0.55
+        blackRubber:
+            op: Material
+            with:
+                color: [0.02, 0.02, 0.02, 1]
+                roughness: 0.9
+    render:
+        expression: |
+            const res = params.resolution
+            const R = params.bowlRadius            // bowl outer radius
+            const H = params.bowlHeight            // bowl height
+            const yH = 0.014                       // handle axis height above bowl bottom
+
+            // ---- Bowl (cup) as a revolved cross-section: outer wall, rim, cavity ----
+            const bowlProfile = Polygon({ points: [
+                [0, 0],
+                [R - 0.006, 0],
+                [R - 0.002, 0.005],                // chamfered bottom edge, slight taper
+                [R, H],                            // straight wall, no rim flange
+                [R - 0.0035, H],                   // rim top (wall thickness 3.5 mm)
+                [R - 0.0035, 0.012],               // cavity wall
+                [0, 0.012],                        // cavity floor
+            ] })
+            const bowl = Revolve({ input: bowlProfile, resolution: res })
+
+            // ---- Three locking lugs near the rim, 120 deg apart (none over the handle) ----
+            const lug = Transform({
+                input: Box({ size: [0.011, 0.008, 0.022] }),
+                translate: [R + 0.003, H - 0.004, 0]
+            })
+            // One lug at the tip (opposite the handle), two symmetric about the handle
+            const lugs = [180, 60, 300].map(a => Transform({ input: lug, rotate: [0, a, 0] }))
+
+            // ---- Black gasket sleeve visible between cavity wall and basket ----
+            const gasketPlaced = Revolve({ input: Polygon({ points: [
+                [0.028, 0.012],
+                [R - 0.0036, 0.012],
+                [R - 0.0036, 0.0405],
+                [0.028, 0.0405],
+            ] }), resolution: res })
+
+            // ---- Filter basket (51 mm class) sitting inside the cup ----
+            // Bowl-shaped basket with a thin flared lip resting on top of the cup rim
+            const basketProfile = Polygon({ points: [
+                [0, 0.019],
+                [0.0255, 0.019],                   // rounded outer bottom...
+                [0.0295, 0.0235],
+                [0.0300, 0.030],                   // slightly bulged body
+                [0.0295, 0.044],
+                [R - 0.0005, 0.0502],              // flare out, just above the cup rim
+                [R, 0.0505],                       // lip flush with the bowl exterior
+                [R, 0.0518],                       // thin lip, top edge
+                [0.0285, 0.0518],
+                [0.0262, 0.047],                   // funnel-in shoulder
+                [0.0257, 0.044],                   // straight 51.4 mm bore: a 51 mm
+                [0.0255, 0.030],                   // tamper passes with 0.2 mm clearance
+                [0.0225, 0.0252],                  // rounding toward the floor
+                [0.0205, 0.0248],
+                [0, 0.0248],
+            ] })
+            const basket = Revolve({ input: basketProfile, resolution: res })
+
+            // Black rubber ring around the strainer plate (embedded, no coplanar faces)
+            const strainerRing = Revolve({ input: Polygon({ points: [
+                [0.016, 0.0244],
+                [0.023, 0.0244],
+                [0.023, 0.0288],
+                [0.016, 0.0288],
+            ] }), resolution: res })
+
+            // Raised perforated strainer plate with hole pattern (concentric dot rings)
+            const strainerPlate = Transform({
+                input: Cylinder({ height: 0.0030, radiusLow: 0.0165,
+                                  resolution: res, anchor: [0.5, 0, 0.5] }),
+                translate: [0, 0.0246, 0]
+            })
+            const holePositions = [[0.003, 6], [0.006, 10], [0.009, 14], [0.012, 18], [0.015, 22]]
+                .flatMap(([r, n]) => Range({ count: n }).map(i => {
+                    const a = i * 2 * Math.PI / n
+                    return [r * Math.cos(a), 0.0276, r * Math.sin(a)]
+                }))
+            const holes = Place({
+                input: Cylinder({ height: 0.0004, radiusLow: 0.00035,
+                                  resolution: 8, anchor: [0.5, 0, 0.5] }),
+                positions: holePositions
+            })
+
+            // ---- Twin spouts + center boss under the bowl ----
+            // Flush screw head on the underside (barely proud, no bump)
+            const boss = Cylinder({
+                height: 0.0005, radiusLow: 0.0045, resolution: res, anchor: [0.5, 1, 0.5]
+            })
+            const bossPlaced = Transform({ input: boss, translate: [0, 0, 0] })
+            // Hollow spout tube: outer cylinder minus a bore at the tip
+            const spoutTube = Difference([
+                Cylinder({ height: 0.011, radiusLow: 0.0052, radiusHigh: 0.0058,
+                           resolution: res, anchor: [0.5, 1, 0.5] }),
+                Transform({
+                    input: Cylinder({ height: 0.007, radiusLow: 0.0042,
+                                      resolution: res, anchor: [0.5, 0, 0.5] }),
+                    translate: [0, -0.012, 0]
+                })
+            ])
+            // Black plastic insert recessed in the tip, with a cross divider
+            const crossBar = Box({ size: [0.0078, 0.0025, 0.0012] })
+            const spoutInsert = Group([
+                Transform({
+                    input: Cylinder({ height: 0.004, radiusLow: 0.004,
+                                      resolution: res, anchor: [0.5, 0, 0.5] }),
+                    translate: [0, -0.0105, 0]
+                }),
+                Transform({ input: crossBar, translate: [0, -0.0095, 0] }),
+                Transform({ input: crossBar, rotate: [0, 90, 0], translate: [0, -0.0095, 0] }),
+            ])
+            // Short parallel spouts, spread apart and offset toward the handle (+X)
+            const spoutTubes = [-1, 1].map(s => Transform({
+                input: spoutTube, translate: [0.004, 0.003, s * 0.013]
+            }))
+            const spoutInserts = [-1, 1].map(s => Transform({
+                input: spoutInsert, translate: [0.004, 0.003, s * 0.013]
+            }))
+
+            // ---- Helper: cylinder along +X starting at x0, at handle height ----
+            const cylX = (x0, len, r0, r1) => Transform({
+                input: Cylinder({ height: len, radiusLow: r0, radiusHigh: r1,
+                                  resolution: res, anchor: [0.5, 0, 0.5] }),
+                rotate: [0, 0, -90],
+                translate: [x0, yH, 0]
+            })
+
+            // ---- Neck (chrome frustum), rubber collar, handle, chrome end cap ----
+            const hr = params.handleRadius
+            const hLen = params.handleLength
+            const x0 = R - 0.006                   // neck starts inside the bowl wall
+            const neck = cylX(x0, 0.052 - x0 + 0.001, 0.010, hr + 0.001)
+            const collar = cylX(0.050, 0.009, hr + 0.002, hr + 0.002)
+            const handle = cylX(0.056, hLen, hr, hr - 0.001)
+            const capStart = 0.056 + hLen
+            const cap = cylX(capStart, 0.014, hr - 0.0009, hr - 0.004)
+
+            // ---- Assign materials and assemble ----
+            return Group([
+                ApplyMaterial({ input: Group([bowl, Group(lugs), bossPlaced, Group(spoutTubes)]),
+                                material: assets.aluminum }),
+                ApplyMaterial({ input: Group([basket, strainerPlate]), material: assets.steel }),
+                ApplyMaterial({ input: Group([spoutInserts[0], spoutInserts[1], holes]),
+                                material: assets.blackPlastic }),
+                ApplyMaterial({ input: Group([gasketPlaced, strainerRing]),
+                                material: assets.blackRubber }),
+                ApplyMaterial({ input: neck, material: assets.chrome }),
+                ApplyMaterial({ input: collar, material: assets.blackRubber }),
+                ApplyMaterial({ input: handle, material: assets.blackPlastic }),
+                ApplyMaterial({ input: cap, material: assets.chrome }),
+            ])
+        produces: MESHES
+watertank.moon: |
+    moon: "1.0"
+    doc: |
+        DeLonghi Dedica EC685 water tank (1.1 l class), real-world scale in meters.
+        Smoked translucent plastic. D-shaped cross-section: flat front face at
+        z = +flatDepth (mates with the machine back), straight side walls, and a
+        half-ellipse rounded rear toward -Z. X centered on the tank.
+        Base skirt rests on Y=0 (arched cut-out, legs at the sides); the raised
+        tank floor carries two outlet valves. The closed lid continues the main
+        machine's 15 mm top chamfer around the sides and rounded rear, while its
+        front mating edge stays vertical. Total height 27.0 cm.
+    params:
+        width:
+            default: 0.149
+            doc: |
+                Overall tank width (X), meters.
+            min: 0.10
+            max: 0.16
+        depth:
+            default: 0.088
+            doc: |
+                Overall tank depth (Z), flat face to the back of the curve.
+            min: 0.06
+            max: 0.12
+        flatDepth:
+            default: 0.030
+            doc: |
+                Depth of the straight (prismatic) section behind the flat face.
+            min: 0.01
+            max: 0.05
+        height:
+            default: 0.248
+            doc: |
+                Body height (without lid). Lid adds ~2.8 cm.
+            min: 0.15
+            max: 0.30
+        wall:
+            default: 0.0025
+            min: 0.0015
+            max: 0.005
+        resolution:
+            default: 64
+            min: 16
+            max: 128
+    assets:
+        smokedPlastic:
+            op: Material
+            with:
+                color: [0.30, 0.34, 0.36, 0.45]
+                roughness: 0.12
+        darkSmoke:
+            op: Material
+            with:
+                color: [0.10, 0.11, 0.12, 0.75]
+                roughness: 0.2
+        blackPlastic:
+            op: Material
+            with:
+                color: [0.04, 0.04, 0.04, 1]
+                roughness: 0.5
+        grayPlastic:
+            op: Material
+            with:
+                color: [0.55, 0.56, 0.55, 1]
+                roughness: 0.6
+    render:
+        expression: |
+            const res = params.resolution
+            const W = params.width, hw = W / 2
+            const d1 = params.flatDepth            // straight section, +y side (2D)
+            const d2 = params.depth - d1           // half-ellipse depth, -y side
+            const wall = params.wall
+            const topY = params.height             // body rim height
+            const floorY = 0.030                   // raised tank floor (top surface)
+
+            // ---- D-shaped outer cross-section (2D; +y maps to +Z) ----
+            const nArc = Math.max(16, Math.round(res / 2))
+            const arcPts = Range({ count: nArc + 1 }).map(i => {
+                const t = Math.PI * i / nArc       // (hw,0) -> (0,-d2) -> (-hw,0)
+                return [hw * Math.cos(t), -d2 * Math.sin(t)]
+            })
+            const outer = Polygon({ points: [[-hw, d1], [hw, d1], ...arcPts] })
+            const inner = Offset({ input: outer, delta: -wall })
+
+            // ---- Hollow body: walls, raised floor, open skirt below, open top ----
+            const bodySolid = Extrude({ input: outer, height: topY })
+            const cavityTop = Transform({
+                input: Extrude({ input: inner, height: topY - floorY + 0.02 }),
+                translate: [0, floorY, 0]
+            })
+            const cavitySkirt = Transform({
+                input: Extrude({ input: inner, height: floorY - 0.003 + 0.01 }),
+                translate: [0, -0.01, 0]
+            })
+            // Arched cut-out of the base skirt (legs remain at +-X)
+            const arch = Transform({
+                input: Cylinder({ height: 1, radiusLow: 1, resolution: res }),
+                scale: [hw - 0.012, params.depth + 0.04, 0.020],
+                rotate: [90, 0, 0],
+                translate: [0, 0, (d1 - d2) / 2]
+            })
+            const body = Difference([bodySolid, cavityTop, cavitySkirt, arch])
+
+            // ---- Vertical seam ribs on the curved rear surface ----
+            const ribH = topY - floorY - 0.004
+            const ribs = [-0.6, 0, 0.6].map(a => {
+                const t = Math.PI / 2 + a
+                const px = hw * Math.cos(t), pz = -d2 * Math.sin(t)
+                const nx = Math.cos(t) / hw, nz = -Math.sin(t) / d2
+                const yaw = Math.atan2(nx, nz) * 180 / Math.PI
+                return Transform({
+                    input: Box({ size: [0.0025, ribH, 0.0035] }),
+                    rotate: [0, yaw, 0],
+                    translate: [px, floorY + ribH / 2, pz]
+                })
+            })
+
+            // ---- Two outlet valves hanging from the raised floor ----
+            // Centers match the receiver plate in coffeemachine.moon. The longer
+            // stems reach the receiver while the tank skirt itself sits on the base.
+            const valve = (x, z) => Group([
+                Transform({
+                    input: Cylinder({ height: 0.029, radiusLow: 0.0068,
+                                      resolution: 32, anchor: [0.5, 1, 0.5] }),
+                    translate: [x, floorY - 0.001, z]
+                }),
+                ...[0.010, 0.017, 0.024].map(dy => Transform({
+                    input: Cylinder({ height: 0.0016, radiusLow: 0.008,
+                                      resolution: 32, anchor: [0.5, 0.5, 0.5] }),
+                    translate: [x, floorY - 0.001 - dy, z]
+                }))
+            ])
+            const valves = [valve(-0.0145, -0.001), valve(0.0145, -0.001)]
+
+            // ---- Internal valve seat / cup on the tank floor (visible through walls) ----
+            const valveCup = Transform({
+                input: Difference([
+                    Cylinder({ height: 0.024, radiusLow: 0.012,
+                               resolution: 32, anchor: [0.5, 0, 0.5] }),
+                    Transform({
+                        input: Cylinder({ height: 0.024, radiusLow: 0.0095,
+                                          resolution: 32, anchor: [0.5, 0, 0.5] }),
+                        translate: [0, 0.003, 0]
+                    })
+                ]),
+                translate: [-0.0145, floorY, -0.001]
+            })
+            const valveStub = Transform({
+                input: Cylinder({ height: 0.006, radiusLow: 0.0075,
+                                  resolution: 32, anchor: [0.5, 0, 0.5] }),
+                translate: [0.0145, floorY, -0.001]
+            })
+
+            // ---- Lid continuing the machine's 15 mm top chamfer ----
+            // A 6 mm vertical band reaches the same y=0.288 chamfer start as the
+            // main body. The entire D-profile then insets by 15 mm over a 15 mm
+            // rise. At the machine-facing seam its 119 mm top edge exactly matches
+            // the main body's 119 mm rear top edge, so the side chamfer has no
+            // straight interruption or terminating wedge.
+            const cham = 0.015
+            const bandH = 0.006
+            const capH = 0.001
+            const inset = Offset({ input: outer, delta: -cham })
+            const seamBridge = Transform({
+                input: Rect({ size: [W - 2 * cham, cham + 0.001], anchor: [0.5, 1] }),
+                translate: [0, d1]
+            })
+            const lidTopProfile = Union([inset, seamBridge])
+            const lidBand = Extrude({ input: outer, height: bandH })
+            const bottomSection = Transform({
+                input: Extrude({ input: outer, height: 0.0002 }),
+                translate: [0, bandH, 0]
+            })
+            const topSection = Transform({
+                input: Extrude({ input: lidTopProfile, height: 0.0002 }),
+                translate: [0, bandH + cham - 0.0002, 0]
+            })
+            const lidChamfer = Hull(Group([bottomSection, topSection]))
+            const lidCap = Transform({
+                input: Extrude({ input: lidTopProfile, height: capH }),
+                translate: [0, bandH + cham, 0]
+            })
+            const lidPlaced = Transform({
+                input: Group([lidBand, lidChamfer, lidCap]),
+                translate: [0, topY, 0]
+            })
+            // Small grab lip overhanging the flat front edge
+            const lidLip = Transform({
+                input: Box({ size: [0.030, 0.005, 0.008] }),
+                translate: [0, topY + 0.0035, d1 - 0.001]
+            })
+
+            // ---- Functional-looking central lid hinge ----
+            // The real tank has a compact black housing at the rounded rear, with a
+            // transverse pin and two lid-side knuckles. It lets the clear top flap
+            // pivot open or detach; the assembled model shows that flap closed.
+            const hingeHousing = Transform({
+                input: RoundedBox({ size: [0.034, 0.020, 0.018],
+                                    radius: 0.004, resolution: 16 }),
+                translate: [0, topY + 0.003, -d2 + 0.005]
+            })
+            const hingePin = Transform({
+                input: Cylinder({ height: 0.046, radiusLow: 0.0042,
+                                  resolution: 32, anchor: [0.5, 0.5, 0.5] }),
+                rotate: [0, 0, 90],
+                translate: [0, topY + 0.012, -d2 + 0.002]
+            })
+            const knuckle = x => Transform({
+                input: Cylinder({ height: 0.010, radiusLow: 0.006,
+                                  resolution: 32, anchor: [0.5, 0.5, 0.5] }),
+                rotate: [0, 0, 90],
+                translate: [x, topY + 0.012, -d2 + 0.002]
+            })
+            const hinge = Group([hingeHousing, hingePin, knuckle(-0.019), knuckle(0.019)])
+
+            // ---- Materials and assembly ----
+            return Group([
+                ApplyMaterial({ input: Group([body, ...ribs]),
+                                material: assets.smokedPlastic }),
+                ApplyMaterial({ input: lidPlaced,
+                                material: assets.darkSmoke }),
+                ApplyMaterial({ input: Group([...valves, hinge]),
+                                material: assets.blackPlastic }),
+                ApplyMaterial({ input: Group([valveCup, valveStub]),
+                                material: assets.grayPlastic }),
+            ])
+        produces: MESHES
+main.moon.webp: !!binary |
+    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
