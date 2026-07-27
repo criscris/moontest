@@ -9,13 +9,21 @@ main.moon: |
         S tangent-horizontal at its front tip; the rear leg is an arc of radius
         S/2 centered on the rear edge at half height. Chromed 30x10 mm flat-steel
         bars, leather straps, button-tufted leather cushions (5x4 panels,
-        pebbled dark-grey leather). Front faces +X (a seated person looks
+        upholstery selectable: pebbled black, pale ivory, or Acqua-style
+        chocolate brown).
+        Front faces +X (a seated person looks
         toward +X); internally the profile is built facing -X and the final
         assembly is yawed 180 degrees.
     params:
         show_cushions:
             default: true
             category: Appearance
+        upholstery:
+            default: black
+            doc: |
+                Cushion leather color.
+            category: Appearance
+            choices: [black, white, brown]
     assets:
         chromeColorImg:
             doc: |
@@ -55,31 +63,40 @@ main.moon: |
                 metallic:
                     asset: chromeMetalImg
                 textureSizeInMeters: 0.35
-        leatherColorImg:
-            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather026_Color.jpg
-        leatherNormalImg:
-            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather026_NormalGL.jpg
-        leatherRoughImg:
-            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather026_Roughness.jpg
-        leatherNormalProc:
-            expression: |
-                const t = Resize({ input: assets.leatherNormalImg, size: [1024, 1024] })
-                return Image(Clamp({ input: t.values * 0.35 + Data([0.5, 0.5, 1.0]) * 0.65, min: 0, max: 1 }))
-            produces: IMAGE
-        leatherRoughProc:
-            expression: |
-                return Resize({ input: assets.leatherRoughImg, size: [1024, 1024] })
-            produces: IMAGE
         leather:
-            op: Material
-            with:
-                color:
-                    asset: leatherColorImg
-                normal:
-                    asset: leatherNormalProc
-                roughness:
-                    asset: leatherRoughProc
-                textureSizeInMeters: 0.5
+            match:
+                param: upholstery
+            cases:
+                black:
+                    op: Material
+                    with:
+                        color:
+                            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather026_Color.jpg
+                        normal:
+                            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather026_NormalGL.jpg
+                        roughness:
+                            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather026_Roughness.jpg
+                        textureSizeInMeters: 1.0
+                white:
+                    op: Material
+                    with:
+                        color:
+                            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather025_Color.jpg
+                        normal:
+                            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather025_NormalGL.jpg
+                        roughness:
+                            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather025_Roughness.jpg
+                        textureSizeInMeters: 1.0
+                brown:
+                    op: Material
+                    with:
+                        color:
+                            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather028_Color.jpg
+                        normal:
+                            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather028_NormalGL.jpg
+                        roughness:
+                            import: https://assets.moonomat.com/textures/ambientcg/Leather/Leather028_Roughness.jpg
+                        textureSizeInMeters: 1.0
         strapLeather:
             op: Material
             with:
@@ -271,10 +288,16 @@ main.moon: |
                     const relief = Clamp({ input: Maximum({ input: base, other: btn }), min: 0, max: 1 })
                     // Rounded shoulder along the outer edges: the top surface
                     // rolls off in a quarter-round instead of a sharp 90 corner.
+                    // Rolled over a wide 45 mm band (not a tight 20 mm one) so
+                    // the edge is a gentle slope rather than a near-vertical
+                    // wall: a steep face maps a tiny XZ footprint onto a large
+                    // vertical extent, stretching the baked UVs into visible
+                    // vertical streaks. A shallower roll-off keeps the texel
+                    // density even and kills the streaking.
                     const bdu = Minimum({ input: u, other: 1 - u }) * params.sizeX
                     const bdv = Minimum({ input: v, other: 1 - v }) * params.sizeZ
                     const bd = Minimum({ input: bdu, other: bdv })
-                    const t = Clamp({ input: bd / 0.02, min: 0, max: 1 })
+                    const t = Clamp({ input: bd / 0.045, min: 0, max: 1 })
                     const shoulder = Sqrt(t * (2 - t))
                     const field = Minimum({ input: relief, other: shoulder })
                     return Heightmap({
@@ -305,13 +328,13 @@ main.moon: |
                             sizeZ: 0.74
                             cellsX: 4
                             cellsZ: 5
-                            maxPuff: 0.026
-                            base: 0.055
+                            maxPuff: 0.021
+                            base: 0.060
         backCushion:
             op: Transform
             with:
                 rotate: [0, 0, 69.26]
-                translate: [0.2754, 0.5231, 0]
+                translate: [0.2754, 0.5306, 0]
             input:
                 op: BakeMaterial
                 input:
@@ -327,8 +350,8 @@ main.moon: |
                             sizeZ: 0.74
                             cellsX: 4
                             cellsZ: 5
-                            maxPuff: 0.026
-                            base: 0.055
+                            maxPuff: 0.021
+                            base: 0.060
     render:
         op: Transform
         with:
@@ -348,62 +371,8 @@ main.moon: |
                   - asset: frame
                   - asset: backStraps
                   - asset: seatStraps
-debug_web.moon: |
-    moon: "1.0"
-    doc: |
-        Diagnostic: inspect the normals of the crossing web's fillet wall.
-        Rebuilds the web plate (as in main.moon), then samples all vertices
-        lying on the top R15 fillet arc wall and reports position angle,
-        actual normal, and deviation from the ideal radial normal.
-    render:
-        expression: |
-            const circle = o => Transform({ input: Circle({ radius: 0.0152, resolution: 256 }), translate: o })
-            const webs2d = Difference([
-                Polygon({ points: [
-                    [0.486286, 0.178345], [0.471266, 0.181763], [0.452519, 0.182001],
-                    [0.437816, 0.178466], [0.437514, 0.155055], [0.452534, 0.151637],
-                    [0.471281, 0.151399], [0.485984, 0.154934]
-                ] }),
-                circle([0.4955, 0.1667]), circle([0.4619, 0.1936]),
-                circle([0.4283, 0.1667]), circle([0.4619, 0.1398])
-            ])
-            const solid = Smooth({ input: Extrude({ input: webs2d, height: 0.030 }), subdivisions: 0, minSharpAngle: 45 })
-            const m = solid.meshes[0]
-            // Top fillet circle center (2D). Extruded: 2D (x, y) -> 3D (x, h, y).
-            const C = [0.4619, 0.1936]
-            const out = []
-            for (let i = 0; i < m.vertexCount; i++) {
-                const v = m.vertices[i]
-                const dx = v[0] - C[0], dz = v[2] - C[1]
-                const r = Math.sqrt(dx * dx + dz * dz)
-                if (Math.abs(r - 0.0152) > 0.0008) continue
-                const n = m.normals[i]
-                // ideal wall normal: horizontal, pointing toward the center
-                const ideal = [-dx / r, 0, -dz / r]
-                const dot = n[0] * ideal[0] + n[1] * ideal[1] + n[2] * ideal[2]
-                const ang = Math.atan2(dz, dx) * 180 / Math.PI
-                out.push({
-                    i,
-                    ang: Math.round(ang * 100) / 100,
-                    h: Math.round(v[1] * 1000) / 1000,
-                    nx: Math.round(n[0] * 1000) / 1000,
-                    ny: Math.round(n[1] * 1000) / 1000,
-                    nz: Math.round(n[2] * 1000) / 1000,
-                    dot: Math.round(dot * 1000) / 1000
-                })
-            }
-            out.sort((a, b) => (a.ang - b.ang) || (a.h - b.h))
-            return { meshCount: solid.length, vertexCount: m.vertexCount, samples: out }
-main.params.moon: |
-    moon: "1.0"
-    doc: |
-        Parameter override for ./main.moon
-    render:
-        use:
-            import: "./main.moon"
-        with: {}
 main.moon.webp: !!binary |
-    UklGRioTAABXRUJQVlA4WAoAAAAwAAAA/wAA/wAASUNDUMgBAAAAAAHIAAAAAAQw
+    UklGRkYTAABXRUJQVlA4WAoAAAAwAAAA/wAA/wAASUNDUMgBAAAAAAHIAAAAAAQw
     AABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAA
     AAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAA
@@ -413,96 +382,96 @@ main.moon.webp: !!binary |
     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
-    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
-    7/5FREsa4BrJqv0HRwUAAAAA
+    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
