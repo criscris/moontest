@@ -10,11 +10,12 @@ main.moon: |
         the portafilter handle points +Z. The main block (coffeemachine.moon) is
         modeled in assembly coordinates: back face at z = -0.077, head front at
         z = +0.105. The water tank hangs on the machine back, its curved rear
-        closing the machine depth at z = -0.165, its skirt seated directly on
-        the base top at y = 0.034. The drip tray sits on the ground at the machine
-        front, its rounded edge closing the depth at z = +0.165.
-        The tank stands open behind the machine back, accessible from the top;
-        its two outlet valves engage a receiver recessed flush into the base.
+        closing the machine depth at z = -0.165. Its open skirt slides over
+        a close-fitting raised D-shaped locator on the base at y = 0.034, while a thin
+        black upper clip captures its front wall as the tank drops into place.
+        The drip tray is raised 2 mm so its top aligns with the machine's black
+        base, with its rounded edge at z = +0.165. The tank stands open behind
+        the machine back; its two outlet valves engage the recessed receiver.
         Base + body (0.248) + lid (0.022) close flush with the machine top at
         0.304; the lid's fully inset D-profile continues the machine's 15 mm
         chamfer directly through the top seam and around the rounded rear. The drip
@@ -45,7 +46,7 @@ main.moon: |
         driptray:
             op: Transform
             with:
-                translate: [0, 0, 0.028]
+                translate: [0, 0.002, 0.028]
             input:
                 use:
                     import: ./driptray.moon
@@ -260,6 +261,65 @@ coffeemachine.moon: |
                 return ApplyMaterial({
                     input: Transform({ input: Group([drum, Group([top, pin])]), translate: [0, 0.008, 0] }),
                     material: assets.basePlastic
+                })
+            produces: MESHES
+        tankLocator:
+            doc: |
+                Low raised D-shaped locating rim on the rear base. The water
+                tank's open lower skirt slides over and hugs this protrusion.
+            expression: |
+                const hw = 0.071
+                const frontZ = -0.082
+                const arcZ = -0.107
+                const rearDepth = 0.051
+                const n = 36
+                const points = [[-hw, frontZ], [hw, frontZ], [hw, arcZ]]
+                for (let i = 1; i <= n; i++) {
+                    const angle = Math.PI * i / n
+                    points.push([
+                        Math.cos(angle) * hw,
+                        arcZ - Math.sin(angle) * rearDepth
+                    ])
+                }
+                const outer = Polygon({ points })
+                const inner = Offset({ input: outer, delta: -0.005 })
+                const rim = Difference([
+                    Extrude({ input: outer, height: 0.006 }),
+                    Extrude({ input: inner, height: 0.008 })
+                ])
+                return ApplyMaterial({
+                    input: Transform({ input: rim, translate: [0, 0.034, 0] }),
+                    material: assets.basePlastic
+                })
+            produces: MESHES
+        tankClip:
+            doc: |
+                Subtle open-top rear clip: the tank's front wall slides down
+                between the machine-backed plate and the short retaining lip.
+            expression: |
+                const backPlate = RoundedBox({
+                    size: [0.056, 0.020, 0.0025],
+                    radius: 0.0012,
+                    resolution: 12
+                })
+                const lowerShelf = Transform({
+                    input: Box({ size: [0.052, 0.004, 0.0055] }),
+                    translate: [0, -0.008, -0.00175]
+                })
+                const retainingLip = Transform({
+                    input: RoundedBox({
+                        size: [0.052, 0.010, 0.0025],
+                        radius: 0.001,
+                        resolution: 12
+                    }),
+                    translate: [0, -0.005, -0.0045]
+                })
+                return ApplyMaterial({
+                    input: Transform({
+                        input: Group([backPlate, lowerShelf, retainingLip]),
+                        translate: [0, 0.278, -0.079]
+                    }),
+                    material: assets.black
                 })
             produces: MESHES
         column:
@@ -536,6 +596,34 @@ coffeemachine.moon: |
                     })
                 ])
             produces: MESHES
+        smoothPlaque:
+            doc: |
+                Badge with continuous normals on its outward curved faces while
+                retaining the original normals around its perimeter and back.
+            expression: |
+                const a = params.width / 2
+                const b = 0.048
+                const centerZ = 0.115
+                const rebuilt = []
+                for (const mesh of assets.plaque.meshes) {
+                    const normals = []
+                    for (let i = 0; i < mesh.vertexCount; i++) {
+                        const p = mesh.vertices[i]
+                        const source = mesh.normals[i]
+                        let x = p[0] / (a * a)
+                        let z = (p[2] - centerZ) / (b * b)
+                        const length = Math.sqrt(x * x + z * z)
+                        x /= length
+                        z /= length
+                        const alignment = x * source[0] + z * source[2]
+                        normals.push(alignment > 0.7
+                            ? [x, 0, z]
+                            : [source[0], source[1], source[2]])
+                    }
+                    rebuilt.push(Mesh({ ...mesh, normals }))
+                }
+                return Group(rebuilt)
+            produces: MESHES
         steamKnob:
             expression: |
                 // Chrome steam/hot-water selector matching the real EC685 control:
@@ -574,19 +662,20 @@ coffeemachine.moon: |
         steamWand:
             expression: |
                 const res = 32
-                // A chrome elbow arm carries the wand OUT TO THE SIDE (+X) off the
-                // right of the machine (like the original), so the wand hangs beside
-                // the body, clear of it, and a cup fits underneath. The arm runs from
-                // inside the head front-right (base) sideways to the pivot ball; the
-                // black selector collar and the steel wand tube hang down from there.
-                const base = [0.050, 0.216, 0.065]     // arm root, embedded in the head
-                const pivot = [0.086, 0.206, 0.068]    // outboard elbow / ball-joint centre, out to the side
+                // A bent chrome feed tube leaves the underside vertically, then
+                // turns outward toward +X so the wand hangs beside the body. The
+                // rounded elbow avoids the former straight diagonal connector.
+                const base = [0.050, 0.216, 0.065]
+                const drop = [0.050, 0.199, 0.065]
+                const elbow = [0.058, 0.191, 0.066]
+                const pivot = [0.086, 0.191, 0.068]
                 // Depth-wise the wand sits BETWEEN the group head (z = 0.097) and the
                 // main body front (column face at z = 0.028), not level with the head.
                 const arm = ApplyMaterial({
                     input: Sweep({
                         input: Circle({ radius: 0.004, resolution: res }),
-                        path: [base, pivot]
+                        path: [base, drop, elbow, pivot],
+                        resolution: 6
                     }),
                     material: assets.chrome
                 })
@@ -597,20 +686,20 @@ coffeemachine.moon: |
                 // collar + tube + nozzle, built about the origin (collar top at y=0),
                 // then tilted slightly forward and hung from the pivot.
                 const collar = ApplyMaterial({
-                    input: Cylinder({ height: 0.038, radiusLow: 0.0115, resolution: res, anchor: [0.5, 1, 0.5] }),
+                    input: Cylinder({ height: 0.030, radiusLow: 0.0115, resolution: res, anchor: [0.5, 1, 0.5] }),
                     material: assets.black
                 })
                 const tube = ApplyMaterial({
                     input: Transform({
-                        input: Cylinder({ height: 0.085, radiusLow: 0.0062, resolution: res, anchor: [0.5, 1, 0.5] }),
-                        translate: [0, -0.032, 0]
+                        input: Cylinder({ height: 0.068, radiusLow: 0.0062, resolution: res, anchor: [0.5, 1, 0.5] }),
+                        translate: [0, -0.024, 0]
                     }),
                     material: assets.steel
                 })
                 const tip = ApplyMaterial({
                     input: Transform({
                         input: Cylinder({ height: 0.010, radiusLow: 0.007, resolution: res, anchor: [0.5, 1, 0.5] }),
-                        translate: [0, -0.115, 0]
+                        translate: [0, -0.090, 0]
                     }),
                     material: assets.black
                 })
@@ -626,13 +715,15 @@ coffeemachine.moon: |
           - asset: base
           - asset: trayPlatform
           - asset: tankPedestal
+          - asset: tankLocator
+          - asset: tankClip
           - asset: column
           - asset: headBody
           - asset: headTrim
           - asset: topGrille
           - asset: buttons
           - asset: groupHead
-          - asset: plaque
+          - asset: smoothPlaque
           - asset: steamKnob
           - asset: steamWand
 driptray.moon: |
@@ -695,8 +786,8 @@ driptray.moon: |
         blackPlastic:
             op: Material
             with:
-                color: [0.05, 0.05, 0.055, 1]
-                roughness: 0.35
+                color: [0.025, 0.025, 0.028, 1]
+                roughness: 0.62
         polishedSteel:
             op: Material
             with:
@@ -715,17 +806,19 @@ driptray.moon: |
             expression: |
                 const w = params.width
                 const fr = params.frontRadius
-                const back = Rect({
-                    size: [w, params.depth - fr],
-                    anchor: [0.5, 0],
-                    cornerRadius: [0.006, 0.006],
-                    resolution: params.resolution
-                })
-                const front = Transform({
-                    input: Ellipse({ radii: [w / 2, fr], resolution: params.resolution }),
-                    translate: [0, params.depth - fr]
-                })
-                return Union([back, front])
+                const arcStart = params.depth - fr
+                // One continuous contour avoids the boolean seam where the former
+                // rectangle and ellipse met.
+                const arcSegments = Math.max(16, params.resolution)
+                const points = [[-w / 2, 0], [w / 2, 0], [w / 2, arcStart]]
+                for (let i = 1; i <= arcSegments; i++) {
+                    const angle = Math.PI * i / arcSegments
+                    points.push([
+                        Math.cos(angle) * w / 2,
+                        arcStart + Math.sin(angle) * fr
+                    ])
+                }
+                return Polygon({ points })
             produces: POLYGONS
         blackBody:
             doc: |
@@ -827,17 +920,10 @@ driptray.moon: |
                 round holes; all openings cut through.
             expression: |
                 const t = 0.0015
-                const skirtH = 0.007
+                const skirtH = 0.0035
                 const res = params.resolution
                 const plateOutline = Offset({ input: assets.outline, delta: 0.001 })
-                // Stainless rear tongue slides beneath the steel column face. It
-                // conceals the otherwise exposed black platform at the junction,
-                // making the visible metal surfaces meet without a dark spacer.
-                const rearTongue = Transform({
-                    input: Rect({ size: [params.width + 0.002, 0.022], anchor: [0.5, 1] }),
-                    translate: [0, 0]
-                })
-                const outline = Union([plateOutline, rearTongue])
+                const outline = plateOutline
                 let shell = Difference([
                     Extrude({ input: outline, height: skirtH }),
                     Extrude({
@@ -889,6 +975,46 @@ driptray.moon: |
                     translate: [0, params.trayHeight + 0.002 - skirtH, 0]
                 })
             produces: MESHES
+        smoothCoverPlate:
+            doc: |
+                Cover plate whose curved vertical skirt uses continuous analytic
+                ellipse normals; horizontal faces and deliberate creases retain
+                their original normals.
+            expression: |
+                const a = params.width / 2
+                const b = params.frontRadius
+                const centerZ = params.depth - b
+                const rebuilt = []
+                for (const mesh of assets.coverPlate.meshes) {
+                    const normals = []
+                    for (let i = 0; i < mesh.vertexCount; i++) {
+                        const p = mesh.vertices[i]
+                        const source = mesh.normals[i]
+                        const ellipseRadius = Math.sqrt(
+                            (p[0] / a) ** 2 + ((p[2] - centerZ) / b) ** 2
+                        )
+                        const isCurvedSkirt = Math.abs(source[1]) < 0.5
+                            && p[2] >= centerZ - 0.002
+                            && ellipseRadius > 0.8
+                        if (!isCurvedSkirt) {
+                            normals.push([source[0], source[1], source[2]])
+                            continue
+                        }
+                        let x = p[0] / (a * a)
+                        let z = (p[2] - centerZ) / (b * b)
+                        const length = Math.sqrt(x * x + z * z)
+                        x /= length
+                        z /= length
+                        if (x * source[0] + z * source[2] < 0) {
+                            x = -x
+                            z = -z
+                        }
+                        normals.push([x, 0, z])
+                    }
+                    rebuilt.push(Mesh({ ...mesh, normals }))
+                }
+                return Group(rebuilt)
+            produces: MESHES
     render:
         group:
           - op: ApplyMaterial
@@ -896,7 +1022,12 @@ driptray.moon: |
                 material:
                     asset: blackPlastic
             input:
-                asset: blackBody
+                op: Smooth
+                with:
+                    subdivisions: 0
+                    minSharpAngle: 30
+                input:
+                    asset: blackBody
           - op: ApplyMaterial
             with:
                 material:
@@ -908,7 +1039,7 @@ driptray.moon: |
                 material:
                     asset: polishedSteel
             input:
-                asset: coverPlate
+                asset: smoothCoverPlate
 portafilter.moon: |
     moon: "1.0"
     doc: |
@@ -1346,7 +1477,7 @@ watertank.moon: |
             ])
         produces: MESHES
 main.moon.webp: !!binary |
-    UklGRggNAABXRUJQVlA4WAoAAAAwAAAA/wAA/wAASUNDUMgBAAAAAAHIAAAAAAQw
+    UklGRs4MAABXRUJQVlA4WAoAAAAwAAAA/wAA/wAASUNDUMgBAAAAAAHIAAAAAAQw
     AABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAA
     AAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAA
@@ -1357,62 +1488,61 @@ main.moon.webp: !!binary |
     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
-    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
+    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
+    R47PA4KgX3k/A30d5N6eg8AAAAAAAA==
