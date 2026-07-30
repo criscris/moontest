@@ -1,0 +1,764 @@
+# moons v1
+main.moon: |
+    moon: "1.0"
+    doc: |
+        A dimensionally accurate freestanding striped fabric hammock based on the
+        3.08 m × 1.00 m × 1.23 m reference product. The model includes the black
+        tubular steel base and swept uprights, cross feet with molded end caps,
+        lower reinforcement loops, top hanging eyes, gathered fabric with raised
+        selvage edges, suspension ropes, adjustment coils, and steel connectors.
+    params:
+        fabric_sag:
+            default: 0.43
+            kind: number
+            min: 0.32
+            max: 0.55
+            step: 0.01
+            category: Fabric
+            doc: |
+                Vertical drop of the unloaded hammock bed in meters.
+        stripe_count:
+            default: 11
+            kind: number
+            min: 7
+            max: 15
+            step: 2
+            category: Fabric
+    assets:
+        frameMaterial:
+            op: Material
+            with:
+                color: [0.018, 0.022, 0.026, 1]
+                metallic: 0.72
+                roughness: 0.22
+        darkFabric:
+            op: Material
+            with:
+                color: [0.12, 0.135, 0.15, 1]
+                roughness: 0.92
+        lightFabric:
+            op: Material
+            with:
+                color: [0.79, 0.80, 0.78, 1]
+                roughness: 0.96
+        seamMaterial:
+            op: Material
+            with:
+                color: [0.66, 0.67, 0.65, 1]
+                roughness: 0.9
+        ropeMaterial:
+            op: Material
+            with:
+                color: [0.88, 0.88, 0.84, 1]
+                roughness: 0.78
+        steelMaterial:
+            op: Material
+            with:
+                color: [0.48, 0.5, 0.52, 1]
+                metallic: 0.92
+                roughness: 0.2
+        frame:
+            expression: |
+                const tube = Circle({ radius: 0.031, resolution: 18 })
+                const smallTube = Circle({ radius: 0.016, resolution: 14 })
+                const parts = []
+
+                // Single uninterrupted center rail. The only sleeves belong at the
+                // two cross-leg junctions, not at the middle of the span.
+                parts.push(Sweep({ input: tube, path: [[-0.62, 0.071, 0], [0.62, 0.071, 0]] }))
+
+                for (let s = -1; s <= 1; s += 2) {
+                    const bx = s * 0.60
+
+                    // Exact tangent construction: a sampled circular heel transitions
+                    // continuously into one straight raked arm, eliminating spline kinks.
+                    const uprightPath = [
+                        [s * 0.575, 0.071, 0],
+                        [s * 0.68, 0.071, 0],
+                    ]
+                    const heelCenterX = 0.68
+                    const heelCenterY = 0.251
+                    const heelRadius = 0.18
+                    for (let i = 1; i <= 12; i++) {
+                        const a = -Math.PI / 2 + i / 12 * (56 * Math.PI / 180)
+                        uprightPath.push([
+                            s * (heelCenterX + heelRadius * Math.cos(a)),
+                            heelCenterY + heelRadius * Math.sin(a),
+                            0,
+                        ])
+                    }
+                    const heelEnd = uprightPath[uprightPath.length - 1]
+                    for (let i = 1; i <= 12; i++) {
+                        const t = i / 12
+                        uprightPath.push([
+                            heelEnd[0] * (1 - t) + s * 1.51 * t,
+                            heelEnd[1] * (1 - t) + 1.20 * t,
+                            0,
+                        ])
+                    }
+                    parts.push(Sweep({ input: tube, path: uprightPath, resolution: 1 }))
+
+                    // One-meter transverse stabilizer foot through the base junction.
+                    parts.push(Sweep({ input: tube, path: [[bx, 0.071, -0.44], [bx, 0.071, 0.44]] }))
+
+                    // Sleeve joint located exactly at this cross-leg intersection.
+                    parts.push(Transform({
+                        input: Cylinder({ height: 0.09, radiusLow: 0.037, resolution: 24,
+                                          anchor: [0.5, 0.5, 0.5] }),
+                        rotate: [0, 0, 90],
+                        translate: [bx, 0.071, 0],
+                    }))
+
+                    // Molded shell: one flat slanted outer face, an inverted-U crown
+                    // wrapping the tube, an open inner side, and a flat ground pad.
+                    for (let zsign = -1; zsign <= 1; zsign += 2) {
+                        const vertices = []
+                        const normals = []
+                        const triangles = []
+                        const add = (p, n) => {
+                            vertices.push(p)
+                            normals.push(n)
+                            return vertices.length - 1
+                        }
+                        const outerZ = y => zsign * (0.512 - 0.30 * (y - 0.02))
+
+                        // Single planar angled end face with an inverted-U outline.
+                        const face = []
+                        face.push(add([bx - 0.044, 0.02, outerZ(0.02)], [0, 0.287 * zsign, 0.958 * zsign]))
+                        face.push(add([bx + 0.044, 0.02, outerZ(0.02)], [0, 0.287 * zsign, 0.958 * zsign]))
+                        for (let i = 0; i <= 16; i++) {
+                            const a = Math.PI * i / 16
+                            const y = 0.069 + Math.sin(a) * 0.037
+                            face.push(add([
+                                bx + Math.cos(a) * 0.044,
+                                y,
+                                outerZ(y),
+                            ], [0, 0.287 * zsign, 0.958 * zsign]))
+                        }
+                        const faceCenter = add([bx, 0.059, outerZ(0.059)], [0, 0.287 * zsign, 0.958 * zsign])
+                        for (let i = 0; i < face.length; i++) {
+                            const j = (i + 1) % face.length
+                            triangles.push([faceCenter, face[i], face[j]])
+                        }
+
+                        // Smooth upper half-shell; the inner edge is deliberately open.
+                        const innerCrown = []
+                        const outerCrown = []
+                        for (let i = 0; i <= 16; i++) {
+                            const a = Math.PI * i / 16
+                            const n = [Math.cos(a), Math.sin(a), 0]
+                            innerCrown.push(add([
+                                bx + Math.cos(a) * 0.037,
+                                0.069 + Math.sin(a) * 0.037,
+                                zsign * 0.397,
+                            ], n))
+                            const y = 0.069 + Math.sin(a) * 0.037
+                            outerCrown.push(add([
+                                bx + Math.cos(a) * 0.044,
+                                y,
+                                outerZ(y),
+                            ], n))
+                        }
+                        for (let i = 0; i < 16; i++) {
+                            triangles.push([innerCrown[i], outerCrown[i + 1], outerCrown[i]])
+                            triangles.push([innerCrown[i], innerCrown[i + 1], outerCrown[i + 1]])
+                        }
+
+                        // Two flat angled side cheeks provide the visible side profile,
+                        // while the tube-entry end remains open.
+                        for (const xside of [-1, 1]) {
+                            const sideNormal = [xside, 0, 0]
+                            const cheek = [
+                                add([bx + xside * 0.037, 0.069, zsign * 0.397], sideNormal),
+                                add([bx + xside * 0.044, 0.069, outerZ(0.069)], sideNormal),
+                                add([bx + xside * 0.044, 0.02, zsign * 0.512], sideNormal),
+                                add([bx + xside * 0.044, 0.02, zsign * 0.397], sideNormal),
+                            ]
+                            if (xside > 0) {
+                                triangles.push([cheek[0], cheek[1], cheek[2]], [cheek[0], cheek[2], cheek[3]])
+                            } else {
+                                triangles.push([cheek[0], cheek[2], cheek[1]], [cheek[0], cheek[3], cheek[2]])
+                            }
+                        }
+
+                        // Flat sole, extending inward beneath the tube but without an
+                        // inner vertical closing wall.
+                        const sole = [
+                            add([bx - 0.044, 0.02, zsign * 0.397], [0, -1, 0]),
+                            add([bx + 0.044, 0.02, zsign * 0.397], [0, -1, 0]),
+                            add([bx + 0.044, 0.02, zsign * 0.512], [0, -1, 0]),
+                            add([bx - 0.044, 0.02, zsign * 0.512], [0, -1, 0]),
+                        ]
+                        triangles.push([sole[0], sole[1], sole[2]], [sole[0], sole[2], sole[3]])
+
+                        const wound = zsign > 0 ? triangles : triangles.map(t => [t[0], t[2], t[1]])
+                        parts.push(Mesh({ vertices, triangles: wound, normals }))
+                    }
+
+                    // Open welded sling arc entirely above the heel. Its two ends
+                    // land on the upper surfaces of the horizontal and rising tubes;
+                    // there is no lower return passing through the frame.
+                    parts.push(Sweep({
+                        input: smallTube,
+                        path: [
+                            [s * 0.695, 0.098, 0],
+                            [s * 0.725, 0.146, 0],
+                            [s * 0.765, 0.184, 0],
+                            [s * 0.805, 0.198, 0],
+                            [s * 0.835, 0.184, 0],
+                            [s * 0.85, 0.151, 0],
+                        ],
+                        resolution: 8,
+                    }))
+
+                    // Small visible fasteners at the base bracket.
+                    for (const dz of [-0.035, 0.035]) {
+                        parts.push(Transform({
+                            input: Cylinder({ height: 0.012, radiusLow: 0.009, resolution: 16 }),
+                            rotate: [90, 0, 0],
+                            translate: [s * 0.60, 0.081, dz],
+                        }))
+                    }
+                }
+
+                // Welded upper U-hooks are structurally part of the frame. Their
+                // routing uses world-space attachment coordinates shared with the rope.
+                for (let s = -1; s <= 1; s += 2) {
+                    const armDir = [s * 0.583, 0.812]
+                    const innerSide = [-s * 0.812, 0.583]
+                    const hookMid = [s * 1.475, 1.151]
+                    // Sized for the thin rope: roughly half the previous loop, with
+                    // just enough clear opening under the bridge for the 8.4 mm rope.
+                    const hookHalf = 0.017
+                    const attachOffset = 0.028
+                    const bridgeOffset = 0.040
+                    const hookPath = [[
+                        hookMid[0] + armDir[0] * hookHalf + innerSide[0] * attachOffset,
+                        hookMid[1] + armDir[1] * hookHalf + innerSide[1] * attachOffset,
+                        0,
+                    ]]
+                    for (let i = 0; i <= 32; i++) {
+                        const a = Math.PI * i / 32
+                        hookPath.push([
+                            hookMid[0] + armDir[0] * hookHalf * Math.cos(a)
+                                + innerSide[0] * (bridgeOffset + hookHalf * Math.sin(a)),
+                            hookMid[1] + armDir[1] * hookHalf * Math.cos(a)
+                                + innerSide[1] * (bridgeOffset + hookHalf * Math.sin(a)),
+                            0,
+                        ])
+                    }
+                    hookPath.push([
+                        hookMid[0] - armDir[0] * hookHalf + innerSide[0] * attachOffset,
+                        hookMid[1] - armDir[1] * hookHalf + innerSide[1] * attachOffset,
+                        0,
+                    ])
+                    parts.push(Sweep({
+                        input: Circle({ radius: 0.005, resolution: 24 }),
+                        path: hookPath,
+                        resolution: 1,
+                    }))
+                }
+
+                return ApplyMaterial({ input: Group({ input: parts }), material: assets.frameMaterial })
+            produces: MESHES
+        fabric:
+            expression: |
+                const nx = 65
+                const stripes = params.stripe_count
+                const parts = []
+                const xEnd = 1.285
+                const topY = 1.015
+
+                const point = (i, zeta) => {
+                    const u = i / (nx - 1)
+                    const x = -xEnd + 2 * xEnd * u
+                    const arch = Math.sin(Math.PI * u)
+                    // Rope tension pulls the corners strongly toward the centerline:
+                    // the end span is only 0.30 m wide while mid-length keeps the
+                    // full bulged width — a gentle lens shape in top view, still a
+                    // hammock, not a kayak.
+                    const endHalf = 0.15
+                    const fullHalf = 0.445 + 0.042 * Math.sqrt(Math.max(0, arch))
+                    // A short constant-width throat (first 3 cm, smoothstep) keeps
+                    // the fabric span equal to the channel span where they meet, so
+                    // the stripes cross the junction continuously; only then does
+                    // the lens taper toward the full mid width begin.
+                    const tThroat = Math.min(1, Math.min(u, 1 - u) / 0.03)
+                    const throat = tThroat * tThroat * (3 - 2 * tThroat)
+                    const halfWidth = endHalf + (fullHalf - endHalf) * Math.pow(arch, 0.55) * throat
+                    const z = zeta * halfWidth
+                    // Rope tension curls the side edges up toward the suspension; the
+                    // constant 49 mm component keeps the corners the highest points.
+                    const edgeLift = zeta * zeta * (0.049 + 0.186 * Math.pow(arch, 0.5))
+                    const endGather = 0.018 * Math.sin(10 * Math.PI * u) * Math.abs(zeta) * (1 - arch)
+                    const broadRipple = 0.012 * Math.sin(5 * Math.PI * u + zeta * 2.4) * arch
+                    // Match the sagged short-end rope exactly at u=0/1, then fade its
+                    // transverse gravity profile into the fabric over the end region.
+                    const endChannelDrop = 0.028 * (1 - zeta * zeta) * Math.pow(1 - arch, 2.2)
+                    // The fabric is a flat rectangle: its material width is constant,
+                    // so where the chord is pulled narrower the excess arc length
+                    // buckles into transverse folds. The sine amplitude is computed
+                    // from the actual arc-length deficit (RMS slope model), capped
+                    // near the hem where the gathers are swallowed by the rolled
+                    // channel. sin(9πζ) is zero at ζ=±1, keeping the seams smooth.
+                    const q = 9 * Math.PI
+                    const excess = Math.max(0, fullHalf * fullHalf - halfWidth * halfWidth)
+                    const ruffleAmp = Math.min(
+                        Math.SQRT2 * Math.sqrt(excess) / q,
+                        0.008 + 0.10 * arch
+                    )
+                    const ruffle = ruffleAmp * Math.sin(q * zeta)
+                    const y = topY - params.fabric_sag * Math.pow(arch, 0.78)
+                        + edgeLift + endGather + broadRipple - endChannelDrop + ruffle
+                    return [x, y, z]
+                }
+
+                // Build each longitudinal stripe as its own two-sided mesh. Narrow
+                // alternating panels reproduce the sewn gray/off-white textile.
+                // Each band is subdivided transversely so the end-gather folds are
+                // resolved (a 2-column quad strip would alias the ruffle away).
+                const sub = 4
+                const cols = sub + 1
+                for (let band = 0; band < stripes; band++) {
+                    const z0 = -1 + 2 * band / stripes
+                    const z1 = -1 + 2 * (band + 1) / stripes
+                    const vertices = []
+                    for (let i = 0; i < nx; i++) {
+                        for (let c = 0; c < cols; c++) {
+                            vertices.push(point(i, z0 + (z1 - z0) * c / sub))
+                        }
+                    }
+                    const triangles = []
+                    for (let i = 0; i < nx - 1; i++) {
+                        for (let c = 0; c < sub; c++) {
+                            const a = i * cols + c
+                            const b = (i + 1) * cols + c
+                            triangles.push([a, b, a + 1], [a + 1, b, b + 1])
+                        }
+                    }
+                    const flipped = triangles.map(t => [t[0], t[2], t[1]])
+                    const mat = band % 2 === 0 ? assets.darkFabric : assets.lightFabric
+                    parts.push(Mesh({ vertices, triangles, material: mat }))
+                    parts.push(Mesh({ vertices, triangles: flipped, material: mat }))
+                }
+
+                // Ordinary stitched selvage seams follow the long fabric edges; these
+                // are fabric seams, not suspension rope.
+                const seamSection = Circle({ radius: 0.0014, resolution: 10 })
+                for (const side of [-1, 1]) {
+                    const path = []
+                    for (let i = 0; i < nx; i++) {
+                        const p = point(i, side)
+                        path.push([p[0], p[1] + 0.002, p[2]])
+                    }
+                    parts.push(ApplyMaterial({
+                        input: Sweep({ input: seamSection, path, resolution: 1 }),
+                        material: assets.seamMaterial,
+                    }))
+                }
+
+                // Rolled short-end fabric channels: the same gathered fabric wrapped
+                // around the (straight) enclosed rope, so the sleeve centerline
+                // undulates with exactly the hem's fold function — same 9-half-wave
+                // phase and the same 8 mm amplitude the fabric carries at u = 0/1.
+                // The 13 mm sleeve radius keeps the smooth rope covered everywhere
+                // (8 mm offset + 4.2 mm rope < 13 mm).
+                const shortEndY = z => 0.987 + 0.077 * (z / 0.15) ** 2
+                    + 0.008 * Math.sin(9 * Math.PI * (z / 0.15))
+                for (const s of [-1, 1]) {
+                    for (let band = 0; band < stripes; band++) {
+                        const z0 = -0.15 + 0.30 * band / stripes
+                        const z1 = -0.15 + 0.30 * (band + 1) / stripes
+                        const endPath = []
+                        for (let i = 0; i <= 8; i++) {
+                            const z = z0 + (z1 - z0) * i / 8
+                            endPath.push([s * 1.285, shortEndY(z), z])
+                        }
+                        parts.push(ApplyMaterial({
+                            input: Sweep({
+                                input: Circle({ radius: 0.013, resolution: 16 }),
+                                path: endPath,
+                                resolution: 1,
+                            }),
+                            material: band % 2 === 0 ? assets.darkFabric : assets.lightFabric,
+                        }))
+                    }
+                }
+
+                return Group({ input: parts })
+            produces: MESHES
+        steelHardware:
+            expression: |
+                const parts = []
+                const metalSection = Circle({ radius: 0.0018, resolution: 14 })
+
+                // World-space adjuster centers shared with the rope routing. The
+                // adjuster's long side runs along X (the hammock direction): the
+                // inboard eye serves the rope between the hammock sides, the
+                // outboard eye the rope coming down from the main frame sling.
+                // Both eyes lie in the XY plane, so their holes face along Z.
+                for (let s = -1; s <= 1; s += 2) {
+                    // The link is tilted 38° along its load path: the frame-side eye
+                    // is pulled up toward the rope rising to the black U-sling, the
+                    // hammock-side eye down toward the corner ropes.
+                    const eyeRadius = 0.010
+                    const hammockC = [s * 1.3382, 1.0658]
+                    const frameC = [s * 1.3618, 1.0842]
+                    const perp = [-s * 0.6157, 0.788]
+                    const hammockEye = []
+                    const frameEye = []
+                    for (let i = 0; i <= 32; i++) {
+                        const a = 2 * Math.PI * i / 32
+                        hammockEye.push([
+                            hammockC[0] + eyeRadius * Math.sin(a),
+                            hammockC[1] + eyeRadius * Math.cos(a),
+                            0,
+                        ])
+                        frameEye.push([
+                            frameC[0] + eyeRadius * Math.sin(a),
+                            frameC[1] + eyeRadius * Math.cos(a),
+                            0,
+                        ])
+                    }
+                    parts.push(
+                        Sweep({ input: metalSection, path: hammockEye, resolution: 1, closed: true }),
+                        Sweep({ input: metalSection, path: frameEye, resolution: 1, closed: true }),
+                        Sweep({ input: metalSection, path: [
+                            [hammockC[0] + perp[0] * eyeRadius, hammockC[1] + perp[1] * eyeRadius, 0],
+                            [frameC[0] + perp[0] * eyeRadius, frameC[1] + perp[1] * eyeRadius, 0],
+                        ] }),
+                        Sweep({ input: metalSection, path: [
+                            [hammockC[0] - perp[0] * eyeRadius, hammockC[1] - perp[1] * eyeRadius, 0],
+                            [frameC[0] - perp[0] * eyeRadius, frameC[1] - perp[1] * eyeRadius, 0],
+                        ] }),
+                    )
+                }
+
+                return ApplyMaterial({
+                    input: Group({ input: parts }),
+                    material: assets.steelMaterial,
+                })
+            produces: MESHES
+        rope:
+            expression: |
+                const ropeSection = Circle({ radius: 0.0042, resolution: 18 })
+                const ropes = []
+
+                const normalize = v => {
+                    const n = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+                    return [v[0] / n, v[1] / n, v[2] / n]
+                }
+                const addLine = (path, target, samples = 1) => {
+                    const start = path[path.length - 1]
+                    for (let i = 1; i <= samples; i++) {
+                        const t = i / samples
+                        path.push([0, 1, 2].map(k => start[k] * (1 - t) + target[k] * t))
+                    }
+                }
+                const addCircle = (path, center, axisA, axisB, startAngle, endAngle, samples) => {
+                    for (let i = 1; i <= samples; i++) {
+                        const a = startAngle + (endAngle - startAngle) * i / samples
+                        path.push([0, 1, 2].map(k =>
+                            center[k] + axisA[k] * Math.cos(a) + axisB[k] * Math.sin(a)
+                        ))
+                    }
+                }
+                // Smoothly crosses an aperture from the current entry point to exit.
+                // Cubic handles are aligned with the loaded spans on both sides, so the
+                // generated rope is tangent-continuous and cannot form a control-point kink.
+                const addAperturePass = (path, exit, nextSpanPoint, handle = 0.020, samples = 14) => {
+                    const entry = path[path.length - 1]
+                    const previous = path[path.length - 2]
+                    const inDir = normalize(entry.map((v, k) => v - previous[k]))
+                    const outDir = normalize(nextSpanPoint.map((v, k) => v - exit[k]))
+                    const c1 = entry.map((v, k) => v + inDir[k] * handle)
+                    const c2 = exit.map((v, k) => v - outDir[k] * handle)
+                    for (let i = 1; i <= samples; i++) {
+                        const t = i / samples
+                        const u = 1 - t
+                        path.push([0, 1, 2].map(k =>
+                            u * u * u * entry[k]
+                            + 3 * u * u * t * c1[k]
+                            + 3 * u * t * t * c2[k]
+                            + t * t * t * exit[k]
+                        ))
+                    }
+                }
+
+                // Shared 3-vector helpers and the tangent-arc builder used for all
+                // high-load wire contacts (corner eye splice, frame U-sling).
+                const sub3 = (p, q) => [0, 1, 2].map(k => p[k] - q[k])
+                const dot3 = (p, q) => p[0] * q[0] + p[1] * q[1] + p[2] * q[2]
+                const cross3 = (p, q) => [
+                    p[1] * q[2] - p[2] * q[1],
+                    p[2] * q[0] - p[0] * q[2],
+                    p[0] * q[1] - p[1] * q[0],
+                ]
+                // Circular arc of radius R around wire centerline point O, in the
+                // plane through O, A, B, tangent to the straight strands toward A
+                // and B. Returns the arc parameterized over t in [0, 1].
+                const wrapArc = (O, Apt, Bpt, R, sideHint) => {
+                    const aV = sub3(Apt, O), bV = sub3(Bpt, O)
+                    const nV = normalize(cross3(aV, bV))
+                    const rotN = (v, ang) => {
+                        const c = Math.cos(ang), si = Math.sin(ang)
+                        const cv = cross3(nV, v)
+                        const d = dot3(nV, v) * (1 - c)
+                        return [0, 1, 2].map(k => v[k] * c + cv[k] * si + nV[k] * d)
+                    }
+                    const ua = normalize(aV), ub = normalize(bV)
+                    const mOut = sideHint
+                        ? normalize(sideHint)
+                        : normalize([0, 1, 2].map(k => -(ua[k] + ub[k])))
+                    const pick = (u, dist) => {
+                        const phi = Math.acos(R / dist)
+                        const c1 = rotN(u, phi), c2 = rotN(u, -phi)
+                        return dot3(c1, mOut) > dot3(c2, mOut) ? c1 : c2
+                    }
+                    const dirA = pick(ua, Math.sqrt(dot3(aV, aV)))
+                    const dirB = pick(ub, Math.sqrt(dot3(bV, bV)))
+                    let sweep = Math.atan2(dot3(cross3(dirA, dirB), nV), dot3(dirA, dirB))
+                    if (dot3(rotN(dirA, sweep / 2), mOut) < 0) sweep -= Math.sign(sweep) * 2 * Math.PI
+                    return t => [0, 1, 2].map(k => O[k] + R * rotN(dirA, sweep * t)[k])
+                }
+
+                for (const s of [-1, 1]) {
+                    // One centerline and one Sweep per physical rope.
+                    const slingZ = 0.15
+                    const anchor = [s * 1.285, 1.064, slingZ]
+                    const uThroat = [s * 1.4243, 1.1556, 0]
+
+                    // Adjuster contact geometry: under load the rope rides the far
+                    // ends of the two holes — the lower edge of the lower
+                    // (hammock-side) hole and the upper edge of the upper
+                    // (frame-side) hole — bending around the eye wire there.
+                    const eye1C = [s * 1.3382, 1.0658, 0]
+                    const eye2C = [s * 1.3618, 1.0842, 0]
+                    const axisDir = [s * 0.788, 0.6157, 0]
+                    const wire1 = [0, 1, 2].map(k => eye1C[k] - axisDir[k] * 0.010)
+                    const wire2 = [0, 1, 2].map(k => eye2C[k] + axisDir[k] * 0.010)
+                    const contact1 = [0, 1, 2].map(k => eye1C[k] - axisDir[k] * 0.004)
+                    const contact2 = [0, 1, 2].map(k => eye2C[k] + axisDir[k] * 0.004)
+
+                    // Corner eye splice (donut): a free link under load, so ring and
+                    // splice neck align with the resultant pull of the two strands
+                    // of the crossing rope. The ring plane is spanned by the pull
+                    // direction and the strands' bend-plane normal.
+                    const dA = normalize(sub3(contact1, anchor))
+                    const dB = normalize(sub3(uThroat, anchor))
+                    const dPull = normalize([0, 1, 2].map(k => dA[k] + dB[k]))
+                    const nBend = normalize(cross3(dA, dB))
+                    const rRing = 0.010
+                    const eyeC = [0, 1, 2].map(k => anchor[k] + dPull[k] * 0.022)
+
+                    const path = [[s * 1.285, 1.067, slingZ - 0.020]]
+                    addLine(path, [0, 1, 2].map(k => eyeC[k] - dPull[k] * rRing), 3)
+                    addCircle(
+                        path,
+                        eyeC,
+                        [0, 1, 2].map(k => -dPull[k] * rRing),
+                        [0, 1, 2].map(k => nBend[k] * rRing),
+                        0,
+                        2 * Math.PI,
+                        32
+                    )
+                    addLine(path, anchor, 4)
+
+                    // Enclosed rope follows the same gravity profile as its rolled
+                    // fabric channel across the narrow pulled-together end span.
+                    for (let i = 1; i <= 32; i++) {
+                        const z = slingZ - 2 * slingZ * i / 32
+                        const y = 0.987 + 0.077 * (z / slingZ) ** 2
+                        path.push([s * 1.285, y, z])
+                    }
+
+                    // Under tension the rope leaves the channel mouth straight for
+                    // the lower hole of the adjuster, passing through just above
+                    // the hole's lower edge — the shallow direction change is a
+                    // smooth S through the aperture at the raised contact height.
+                    const eyeWrapO = [0, 1, 2].map(k => eyeC[k] + dPull[k] * rRing)
+                    const eyeArc = wrapArc(eyeWrapO, contact1, uThroat, 0.0084)
+                    // The through-bezier bows ~1.5 mm toward the eye center at the
+                    // ring plane, so the passage endpoints sit 5.5 mm below center:
+                    // the bowed curve then rests exactly on the lower edge (4 mm).
+                    const eye1Pass = [0, 1, 2].map(k => eye1C[k] - axisDir[k] * 0.0055)
+                    const eye1In = [eye1Pass[0], eye1Pass[1], -0.008]
+                    const eye1Out = [eye1Pass[0], eye1Pass[1], 0.008]
+                    addAperturePass(path, eye1In, eye1Out, 0.012, 14)
+                    addAperturePass(path, eye1Out, eyeArc(0), 0.008, 10)
+
+                    // The crossing rope wraps the donut wire rope-on-rope (8.4 mm
+                    // arc radius) at the point diametrically opposite the splice
+                    // neck — shortest way through the ring, round tight bend.
+                    addLine(path, eyeArc(0), 2)
+                    for (let i = 1; i <= 12; i++) path.push(eyeArc(i / 12))
+
+                    // U-sling contact. On the inclined upright the rope slides down
+                    // the bridge into the throat of the U (where the bridge curves
+                    // into the lower arm) — there the net pull is perpendicular to
+                    // the wire. Same round tangent-arc contact (9.2 mm radius).
+                    const slingO = [s * 1.4307, 1.1622, 0]
+                    const uArc = wrapArc(slingO, eyeWrapO, wire2, 0.0092)
+                    addLine(path, uArc(0), 2)
+                    for (let i = 1; i <= 12; i++) path.push(uArc(i / 12))
+
+                    // Down from the throat, the rope bears on the upper edge of the
+                    // upper hole and bends around its wire — no free-space 90° kink,
+                    // the wire itself forces the direction change into the hole.
+                    const tubeExit = [contact2[0], contact2[1], 0.024]
+                    const arc2 = wrapArc(wire2, uThroat, tubeExit, 0.006)
+                    addLine(path, arc2(0), 2)
+                    for (let i = 1; i <= 10; i++) path.push(arc2(i / 10))
+                    addLine(path, tubeExit, 2)
+
+                    // Simplified stopper: a donut of rope — same diameter as the
+                    // rope itself, hugging the standing part — sits seated against
+                    // the eye's front face, centered on the rope where it rides the
+                    // top of the hole. Its outer radius exceeds the remaining clear
+                    // aperture, so the tail cannot be pulled back through.
+                    const donutRing = 2 * 0.0042
+                    const donut = []
+                    for (let i = 0; i <= 40; i++) {
+                        const a = 2 * Math.PI * i / 40
+                        donut.push([
+                            contact2[0] + donutRing * Math.cos(a),
+                            contact2[1] + donutRing * Math.sin(a),
+                            0.006,
+                        ])
+                    }
+                    ropes.push(Sweep({ input: ropeSection, path: donut, resolution: 1, closed: true }))
+
+                    // The tail leaves the donut toward the viewer, then drops under
+                    // gravity with a smooth bend toward the stored spare rope.
+                    const tailDrop = [s * 1.360, 1.030, 0.048]
+                    addAperturePass(path, tailDrop, [s * 1.356, 0.960, 0.054], 0.022, 14)
+
+                    // Spare rope stored as a hanging coil: three helical turns in the
+                    // XY plane, drifting one rope diameter in Z per turn.
+                    const coilCenter = [s * 1.354, 0.885, 0.058]
+                    const coilR = 0.045
+                    const coilSamples = 40
+                    const coilPoint = i => [
+                        coilCenter[0] + s * coilR * Math.sin(2 * Math.PI * i / coilSamples),
+                        coilCenter[1] + coilR * Math.cos(2 * Math.PI * i / coilSamples),
+                        coilCenter[2] + 0.0095 * i / coilSamples,
+                    ]
+                    addAperturePass(path, coilPoint(0), coilPoint(1), 0.018, 12)
+                    for (let i = 1; i <= 3 * coilSamples; i++) path.push(coilPoint(i))
+
+                    // Short free end leaving the last turn, drooping outward.
+                    addAperturePass(path, [s * 1.382, 0.910, 0.094], [s * 1.390, 0.885, 0.098], 0.015, 8)
+
+                    // A white plastic clip band wraps the coil bundle (all turns plus
+                    // the entering tail) at the top, holding the spiral together.
+                    const clip = []
+                    for (let i = 0; i <= 40; i++) {
+                        const a = 2 * Math.PI * i / 40
+                        clip.push([
+                            s * 1.354,
+                            0.930 + 0.0075 * Math.cos(a),
+                            0.072 + 0.024 * Math.sin(a),
+                        ])
+                    }
+                    ropes.push(ApplyMaterial({
+                        input: Sweep({
+                            input: Rect({ size: [0.009, 0.0022] }),
+                            path: clip,
+                            resolution: 1,
+                            closed: true,
+                        }),
+                        material: Material({ color: [0.93, 0.93, 0.92, 1], roughness: 0.4 }),
+                    }))
+
+                    ropes.push(Sweep({ input: ropeSection, path, resolution: 1 }))
+                }
+
+                return ApplyMaterial({
+                    input: Group({ input: ropes }),
+                    material: assets.ropeMaterial,
+                })
+            produces: MESHES
+    render:
+        group:
+          - asset: frame
+          - asset: fabric
+          - asset: steelHardware
+          - asset: rope
+main.moon.webp: !!binary |
+    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
