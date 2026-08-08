@@ -3,9 +3,9 @@ main.moon: |
     moon: "1.0"
     doc: |
         MOON — a Bauhaus-minimal automatic dress watch whose single complication is a
-        large, geometrically true moonphase at 6 o'clock (see ./moon_display.moon).
-        Case Ø 39.5 anthracite PVD, hairline indices, edge-to-edge box crystal,
-        champagne hands, coral second hand, black leather strap.
+        large, geometrically true moonphase at 6 o'clock (see ./assets/moon_watch/moon_display.moon).
+        Case Ø 39.5 satin anthracite PVD with polished accents, hairline indices,
+        optical box sapphire, 18k champagne hands and moon, coral seconds, black leather.
         World frame: dial in the XY plane facing +Z (+Y = 12 o'clock), caseback at z = 0,
         total thickness 8.8 mm. All dimensions true scale (1 mm = 0.001).
     params:
@@ -42,28 +42,32 @@ main.moon: |
             default: true
             doc: |
                 Render the box sapphire crystal (near-clear glass).
+        brandText:
+            default: MOON
+            doc: |
+                Brand label on the dial. Long text is scaled down to fit.
     assets:
         # Colors are sRGB hex from the SPEC / DWG-01, converted to linear for Material.
         casePvd:
-            # anthracite PVD matte #43464C
+            # deep anthracite PVD with a fine satin reflection, not chalky matte
             op: Material
             with:
-                color: [0.0561, 0.0612, 0.0723, 1]
-                roughness: 0.55
-                metallic: 0.9
+                color: [0.045, 0.052, 0.064, 1]
+                roughness: 0.3
+                metallic: 1
         casebackSteel:
-            # same anthracite, polished
+            # polished anthracite steel gives the rear rim a contrasting highlight
             op: Material
             with:
-                color: [0.0561, 0.0612, 0.0723, 1]
-                roughness: 0.25
-                metallic: 0.95
+                color: [0.075, 0.082, 0.095, 1]
+                roughness: 0.12
+                metallic: 1
         dialLacquer:
-            # midnight blue-black #111C38 matte
+            # deep midnight lacquer: controlled sheen supplies depth under the crystal
             op: Material
             with:
-                color: [0.0056, 0.0116, 0.0395, 1]
-                roughness: 0.85
+                color: [0.0045, 0.0095, 0.034, 1]
+                roughness: 0.38
                 metallic: 0
         tickSilver:
             # hairline indices #CFD6E4
@@ -94,12 +98,12 @@ main.moon: |
                 roughness: 0.5
                 metallic: 0
         goldChampagne:
-            # champagne gold #C8A76A (hands, hub, aperture ring — DWG-01 tone)
+            # warm 18k champagne gold; low roughness creates crisp luxury highlights
             op: Material
             with:
-                color: [0.5776, 0.3864, 0.1441, 1]
-                roughness: 0.3
-                metallic: 0.9
+                color: [0.72, 0.47, 0.16, 1]
+                roughness: 0.16
+                metallic: 1
         coral:
             # coral second hand #D0704A
             op: Material
@@ -115,11 +119,11 @@ main.moon: |
                 roughness: 0.9
                 metallic: 0
         glass:
-            # box sapphire: near-clear, must never obscure the dial
+            # optical sapphire: subtle cool tint, almost perfectly polished
             op: Material
             with:
-                color: [0.9, 0.95, 1, 0.14]
-                roughness: 0.08
+                color: [0.82, 0.92, 1, 0.115]
+                roughness: 0.018
                 metallic: 0
         glyph:
             doc: |
@@ -141,7 +145,7 @@ main.moon: |
             doc: |
                 The 24-blade moonphase module at the requested day.
             use:
-                import: ./moon_display.moon
+                import: ./assets/moon_watch/moon_display.moon
             with:
                 moonDay:
                     param: moonDay
@@ -283,37 +287,44 @@ main.moon: |
             // letterspaced text: lay single glyphs on a cursor, then center the block.
             // Text outlines are SVG-style y-down, so mirror y for the y-up world frame.
             const capOfM = Dimensions({ input: assets.glyph({ ch: "M", size: 1 }) })[1]
-            const word = (text, cap, track, at, material) => {
+            // maxWidth (mm): blocks wider than this are scaled down uniformly so
+            // arbitrary label text can never run into the indices or the aperture.
+            const word = (text, cap, track, at, material, maxWidth) => {
                 const fs = cap * MM / capOfM
                 let cursor = 0
                 const letters = []
                 for (const ch of text) {
+                    if (ch === " ") { cursor += 0.6 * fs; continue }
                     const g = assets.glyph({ ch, size: fs })
-                    letters.push(Align({ input: g, anchor: [0, 0], target: [cursor, 0] }))
+                    // translate horizontally only — keep each glyph's baseline-
+                    // relative y so lowercase/descenders align typographically
+                    const left = Bounds({ input: g })[0][0]
+                    letters.push(Transform({ input: g, translate: [cursor - left, 0] }))
                     cursor += Dimensions({ input: g })[0] + track * fs
                 }
-                const block = Align({
-                    input: Mirror({ input: Group(letters), axis: [0, 1] }),
+                if (letters.length === 0) return null
+                let block = Mirror({ input: Group(letters), axis: [0, 1] })
+                if (maxWidth) {
+                    const bw = Dimensions({ input: block })[0]
+                    if (bw > maxWidth * MM) {
+                        const s = maxWidth * MM / bw
+                        block = Transform({ input: block, scale: [s, s] })
+                    }
+                }
+                block = Align({ input: block,
                     anchor: [0.5, 0.5], target: [at[0] * MM, at[1] * MM] })
                 return solid(block, Z_FACE, 0.02, material)
             }
-            const wordmark = word("MOON", 1.3, 0.4, [0, 6.2], assets.wordmarkSilver)
+            const wordmark = word(String(params.brandText), 1.3, 0.4, [0, 6.2],
+                assets.wordmarkSilver, 11)
             const automatic = word("AUTOMATIC", 0.75, 0.33, [0, 4.3], assets.subline)
 
-            // ---- moonphase module: 1.4 mm under the dial at world (0, −8.7) (§9/§10);
-            // module local z=0 (moon-plate face) sits just under the dial opening.
-            // The module's standalone Ø 36.5 plate is clipped to the case interior —
-            // in the watch the hardware stops at the case wall (§10 envelope).
-            const moonModule = Intersection([
-                Transform({ input: assets.display,
-                    translate: [APERT[0] * MM, APERT[1] * MM, 5.65 * MM] }),
-                Transform({
-                    input: Cylinder({ height: 1.7 * MM, radiusLow: 18.3 * MM,
-                        resolution: 192, anchor: [0.5, 0, 0.5] }),
-                    rotate: [90, 0, 0],
-                    translate: [0, 0, 4.55 * MM],
-                }),
-            ])
+            // ---- moonphase module: 1.4 mm under the dial, origin (= moon center) at the
+            // aperture center (§9/§10); module local z=0 (moon-plate face) sits just under
+            // the dial opening. The module's plate is movement-concentric (§8), so this
+            // one translate lands its hardware case-centered.
+            const moonModule = Transform({ input: assets.display,
+                translate: [APERT[0] * MM, APERT[1] * MM, 5.65 * MM] })
 
             // ---- hands (§2.2): straight batons with slight taper, staggered heights ----
             const hourAngle = (params.hour % 12) * 30 + params.minute * 0.5 + params.second / 120
@@ -389,35 +400,36 @@ main.moon: |
             const parts = [ApplyMaterial({ input: caseBody, material: assets.casePvd }),
                 ...lugs, crownAssembly, dial, apertureRing, indices, ...lumeDots, wordmark,
                 automatic, moonModule, hourHand, minuteHand, secondHand, secondLume,
-                hub, hubPin, ...straps]
+                hub, hubPin, ...straps].filter(Boolean)
             if (params.crystal) parts.push(crystal)
             return Group(parts)
         produces: MESHES
-main.params.moon: |
+assets/moon_watch/moon_display.moon: |
     moon: "1.0"
     doc: |
-        Parameter override for ./main.moon
-    render:
-        use:
-            import: "./main.moon"
-        with:
-            moonDay: 1.75
-moon_display.moon: |
-    moon: "1.0"
-    doc: |
-        MOON watch — moonphase display module: a 24-blade "iris" shutter that shows the
-        astronomically true lunar terminator x(y) = cos(2πf)·√(R²−y²) for any day of the
-        synodic cycle, placed per the SPEC §5 blade law — including gibbous phases and
-        tapering crescent tips that the classic twin-hump moonphase cannot render.
-        (Within ~2 days of new moon the §5 sky-overshoot deliberately trims the last
-        ~0.3 mm of tip height — error suppressed toward the sky per SPEC §7.)
-        Two banks of 12 midnight-PVD blades (bank L covers the waxing shadow from the left,
-        bank R the waning shadow from the right) slide over a champagne moon disc printed
-        on a brass plate. Every blade edge carries one chord segment of the terminator;
-        seams hide behind 55° flaps, pole caps overshoot into the dark sky, and parked
-        blades wait just off the moon's limb — dark on dark, invisible.
-        Module local frame: moon center at the origin, face toward +Z, +Y toward 12 o'clock.
-        All dimensions true scale (1 mm = 0.001).
+        MOON watch — moonphase display module, mask-fan architecture.
+
+        One shade per day of the lunation over ONE static moon: 30 thin midnight
+        foils ride a hub sleeve around the motion-works bore, and each is cut away
+        exactly where that day's moon is lit. A single galvanic champagne disc sits
+        fixed at the display station just beneath them, so the day's lit region
+        shines through the cutout while the foil covers the shadow and the sky
+        annulus — dark on dark. Display accuracy is cutting accuracy; no motion
+        generates the boundary.
+        The other 29 shades wait in two spring-fed magazines whose mouths sit at
+        ±82.8°, clear of the aperture. Once per day a peripheral transfer ring
+        swings the next shade in and the spent one out (ruling R2: arrive, then
+        extract — the incoming leaf rides a ramp OVER the one on display, which is
+        then drawn out from underneath, so the aperture is never uncovered).
+        Both piles rest on the chamber floor (R5): fan A's next leaf is always at
+        the bottom, pulled out from under its stack, and fan B's arrivals land on
+        top — which leaves B in exactly the order A needs after the monthly reset.
+        Set moonDay to a fractional day to watch a changeover; revealMechanism
+        exposes the drive train under the leaves.
+
+        Module local frame: moon center (= display station) at the origin, face
+        toward +Z, +Y toward 12 o'clock. Hub, ring and plates are movement-
+        concentric — center (0, +8.7). All dimensions true scale (1 mm = 0.001).
     params:
         moonDay:
             default: 4.5
@@ -427,191 +439,366 @@ moon_display.moon: |
             min: 0
             max: 29.53059
             step: 0.05
+        revealMechanism:
+            default: false
+            doc: |
+                Remove the top guide plate to expose the leaf pile, hub sleeve and
+                transfer ring from the front. Default false = watch-facing view.
+        explode:
+            default: false
+            doc: |
+                Exploded view for inspection: separates the 30 leaves along +Z only.
+                Nothing rotates and nothing shifts laterally — every part keeps its
+                exact plan position, so the view stays true to the layout.
     assets:
-        # Colors from the MOON spec are sRGB hex; Material color is linear — values below
-        # are the sRGB→linear conversions.
-        bladePvd:
-            # PVD midnight #16264A on all blade faces — dark-on-dark hides the mechanism
+        # Colors from the MOON spec are sRGB hex; Material color is linear.
+        leafPvd:
+            # midnight #16264A on the leaf foils (shadow + sky annulus)
             op: Material
             with:
                 color: [0.008, 0.0194, 0.0685, 1]
                 roughness: 0.5
                 metallic: 0.25
-        skyLacquer:
-            # lacquered night sky #16264A on the moon plate
+        plateLacquer:
+            # lacquered midnight on guide/base plates
             op: Material
             with:
                 color: [0.008, 0.0194, 0.0685, 1]
                 roughness: 0.85
                 metallic: 0
         moonChampagne:
-            # galvanic champagne #F0E4C2 moon disc
+            # galvanic 18k champagne moon: luminous, metallic and finely polished
             op: Material
             with:
-                color: [0.8714, 0.7758, 0.5395, 1]
-                roughness: 0.32
-                metallic: 0.85
+                color: [0.86, 0.66, 0.3, 1]
+                roughness: 0.14
+                metallic: 1
         ringSteel:
-            # anthracite cam-ring hint at the module perimeter
+            # anthracite hub sleeve and plates' hardware
             op: Material
             with:
                 color: [0.0423, 0.0482, 0.0578, 1]
                 roughness: 0.45
                 metallic: 0.9
+        steelBright:
+            # polished steel transfer ring
+            op: Material
+            with:
+                color: [0.22, 0.23, 0.25, 1]
+                roughness: 0.28
+                metallic: 1
+        giltBrass:
+            # gilt drive train (star, leap cam, jumper, springs, stops) —
+            # reads against the midnight leaves exactly as in a finished movement
+            op: Material
+            with:
+                color: [0.42, 0.27, 0.09, 1]
+                roughness: 0.33
+                metallic: 1
     render:
         expression: |
-            // ---- MOON spec §4 — fixed definitions (all lengths in mm) ----
-            const MM = 0.001                    // model at true scale: 1 mm = 0.001 m
-            const R = 5                         // moon radius
-            const N = 12                        // blades per bank
-            const SYN = 29.53059                // synodic month, days
-            const PK = 0.17                     // parked clearance off the limb (§5.2)
-            const TH = 0.12                     // blade thickness (§8)
-            const FLAP = 0.55, FLAP_DEG = 55    // interior-tip bevel flap (§5.1)
-            const CAP = 1.2, CAP_Y = R + 0.35   // pole-cap length and tip |y| (§5.1)
+            // ---- constants (mm; display spec rev 0.4 §2) ----
+            const MM = 0.001
+            const R = 5.0                   // moon radius
+            const NL = 30                   // leaves, one per lunation day
+            const SYN = 29.53059
+            const R_MASK = 5.65             // leaf head radius
+            const PIV = 8.7                 // hub -> mask center = aperture offset
+            const MOUTH = 82.8              // magazine mouth azimuth (0.4 clearance)
+            const PITCH = 1.6               // compressed pile pitch
+            const FOIL = 0.03               // foil thickness
+            const ZP = 0.031                // pile pitch in z (foil + ride)
+            // ---- z-stack (spec §6 / ruling R3), local z. watch.moon places local
+            // z = 0 at world 5.65, and the dial underside is world 6.0, so the
+            // module ceiling is local +0.35 and the whole stack hangs below it.
+            const Z_DIAL = 0.35
+            const Z_TOPPLATE = Z_DIAL - 0.13        // top guide plate underside
+            const Z0 = Z_TOPPLATE - 0.95            // chamber floor
+            const COLLAR_IN = 2.85, COLLAR_OUT = 3.35
+            const TAB_R = 14.9, TAB_W = 0.9   // drive tab, clears the head (14.35)
+            const STOP_R = 14.7               // mouth stops engage tabs only
+            const RING_IN = 15.3, RING_OUT = 18.2
+            const PLATE_R = 18.25, BORE_R = 2.5
+            const PC = [0, -8.7]            // hub/movement center, SPEC frame
 
             const day = ((params.moonDay % SYN) + SYN) % SYN
-            const f = day / SYN                 // phase fraction: waxing f < 0.5, waning f >= 0.5
-            const c = Math.cos(2 * Math.PI * f) // phase parameter
-            const w = Math.max(0, c) ** 6       // limb-bias weight, active near new moon (§5 step 3)
-            const E = Math.min(1, Math.abs(f - 0.5) / 0.03)  // clearance easing at full moon (§5.2)
-
-            const limb = y => Math.sqrt(Math.max(0, R * R - y * y))
-            // band partition y_i = −R·cos(π·i/N) — equalizes worst-case facet error (§4)
-            const ys = [...Array(N + 1)].map((_, i) => -R * Math.cos(Math.PI * i / N))
+            const kd = Math.min(NL - 1, Math.floor(day * NL / SYN))   // displayed leaf
+            // exploded view: pure +Z separation, nothing rotates or shifts in plan
+            const EXPL = params.explode ? 0.33 : 0
 
             const rot = ([x, y], deg) => {
-                const a = deg * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a)
-                return [cs * x - sn * y, sn * x + cs * y]
+                const a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a)
+                return [c * x - s * y, s * x + c * y]
             }
-
-            // ---- §5 blade placement law: outline of blade i on a given edge curve ----
-            // Returns 6 vertices in the SPEC frame (+x → 3 o'clock, +y → 6 o'clock).
-            // darkSign: which side of the chord normal n0 is the blade's dark/body side
-            //           (+1 for bank L, −1 for bank R); bodySign: body closure x direction.
-            const bladeOutline = (i, curve, shifted, darkSign, bodySign) => {
-                const y0 = ys[i - 1], y1 = ys[i]
-                // 1. chord between the curve points of the band
-                let A = [curve(y0), y0], B = [curve(y1), y1]
-                const len = Math.hypot(B[0] - A[0], B[1] - A[1])
-                const u = [(B[0] - A[0]) / len, (B[1] - A[1]) / len]   // unit chord
-                const n0 = [-u[1], u[0]]                               // chord normal
-                if (shifted) {
-                    // 2. measured deviation of the true curve at the band midpoint
-                    const ym = (y0 + y1) / 2
-                    const dev = (curve(ym) - A[0]) * n0[0] + (ym - y0) * n0[1]
-                    // 4. shift: half-sag balanced centering everywhere, blending to
-                    //    full-tangent + 0.07 overshoot toward the sky near new moon
-                    const sh = dev * (0.5 + 0.5 * w) + Math.sign(dev) * 0.07 * w
-                    // 5. edge = chord translated by sh·n0
-                    A = [A[0] + sh * n0[0], A[1] + sh * n0[1]]
-                    B = [B[0] + sh * n0[0], B[1] + sh * n0[1]]
-                }
-                // §5.1 tip treatments: pole caps on the outer ends of blades 1 and 12
-                // (straight along the chord 1.2 past the pole, tip y pinned at ±(R+0.35)
-                // in the sky), bevel flaps 0.55 at 55° into the local dark side elsewhere
-                let tipA
-                if (i === 1) {
-                    tipA = [A[0] - CAP * u[0], -CAP_Y]
-                } else {
-                    const d = rot([-u[0], -u[1]], -darkSign * FLAP_DEG)
-                    tipA = [A[0] + FLAP * d[0], A[1] + FLAP * d[1]]
-                }
-                let tipB
-                if (i === N) {
-                    tipB = [B[0] + CAP * u[0], CAP_Y]
-                } else {
-                    const d = rot(u, darkSign * FLAP_DEG)
-                    tipB = [B[0] + FLAP * d[0], B[1] + FLAP * d[1]]
-                }
-                // §5.1 body far side: rectangle closure at width W = 2·s_max + 0.6 (§4.1)
-                const yInner = y0 <= 0 && y1 >= 0 ? 0 : Math.min(Math.abs(y0), Math.abs(y1))
-                const W = 2 * limb(yInner) + 0.6
-                return [tipA, A, B, tipB,
-                    [tipB[0] + bodySign * W, tipB[1]],
-                    [tipA[0] + bodySign * W, tipA[1]]]
+            // leaf pose: rotation about the hub; theta = 0 puts the head on the
+            // aperture (SPEC origin). Negative theta = fan A (3 o'clock side).
+            const aboutHub = (p, deg) => {
+                const r = rot([p[0] - PC[0], p[1] - PC[1]], deg)
+                return [PC[0] + r[0], PC[1] + r[1]]
             }
+            const headCenter = deg => aboutHub([0, 0], deg)
 
-            // ---- §6.2 bank states vs f: deployed / parked, with the two return sweeps
-            // (pre-deploy and flyback, §6.3) rendered as a smooth 0.5-day interpolation
-            const tL = f >= 0.988 || f < 0.5 ? 1 : f >= 0.97 ? (f - 0.97) / 0.018 : 0
-            const tR = f >= 0.5 || f < 0.012 ? 1 : f < 0.03 ? 1 - (f - 0.012) / 0.018 : 0
-
-            const xtL = y => c * limb(y)              // §4 terminator, waxing: dark = x < xt
-            const xtR = y => -c * limb(y)             // §4 terminator, waning: dark = x > xt
-            // §5.2 parked edge, just off the limb. Parked chords are unshifted (per §5 the
-            // centering shift applies to deployed banks only; DWG-02 ground truth), so at
-            // full moon (E→0) their sagitta leaves ~43 µm limb facets — sub-acuity residual.
-            const parkL = y => -(limb(y) + PK * E)
-            const parkR = y => limb(y) + PK * E
-
-            const mix = (a, b, t) => a.map((p, k) =>
-                [p[0] + (b[k][0] - p[0]) * t, p[1] + (b[k][1] - p[1]) * t])
-            const bankBlades = (deployedCurve, parkedCurve, darkSign, bodySign, t) => {
-                const s = t * t * (3 - 2 * t)         // smoothstep over the sweep window
-                return [...Array(N)].map((_, k) => mix(
-                    bladeOutline(k + 1, parkedCurve, false, darkSign, bodySign),
-                    bladeOutline(k + 1, deployedCurve, true, darkSign, bodySign), s))
+            // ---- cutout (lit region) of day k (spec §2; area self-checked in
+            // maskfan_memo.py against the exact illuminated fraction) ----
+            const litPoints = k => {
+                const fv = (k + 0.5) / NL
+                const c = Math.cos(2 * Math.PI * fv)
+                const waxing = fv < 0.5
+                const xt = waxing ? c : -c
+                const pts = []
+                for (let j = 0; j <= 48; j++) {
+                    const y = -R + 2 * R * j / 48
+                    pts.push([xt * Math.sqrt(Math.max(0, R * R - y * y)), y])
+                }
+                const a0 = Math.PI / 2
+                const a1 = waxing ? -Math.PI / 2 : 3 * Math.PI / 2
+                for (let j = 1; j <= 36; j++) {
+                    const a = a0 + (a1 - a0) * j / 36
+                    pts.push([R * Math.cos(a), R * Math.sin(a)])
+                }
+                return pts
             }
-            const bladesL = bankBlades(xtL, parkL, +1, -1, tL)
-            const bladesR = bankBlades(xtR, parkR, -1, +1, tR)
+            // illuminated fraction (1 − cos 2πf)/2 — the guard must test the LIT
+            // area, not the sliver width: the sliver is thin at BOTH new and full
+            // moon, and at full moon the lit region is the whole disc.
+            const litFraction = k => (1 - Math.cos(2 * Math.PI * (k + 0.5) / NL)) / 2
 
-            // ---- build 3D — SPEC frame (x, y·toward-6) maps to world (x, −y), face +Z:
-            // Polygon + Extrude(+Y) rotated +90° about X does exactly that, with the
-            // extrusion thickness landing in [z0, z0 + th]
-            const solidify = (pts, z0, th, material) => ApplyMaterial({
+            // ---- 2D helpers (SPEC frame -> world (x, -y), face +Z) ----
+            const circle2 = (r, at, res) => Transform({
+                input: Circle({ radius: r * MM, resolution: res }),
+                translate: [at[0] * MM, at[1] * MM],
+            })
+            const poly2 = pts => Polygon({ points: pts.map(p => [p[0] * MM, p[1] * MM]) })
+            const extrude2 = (shape, z0, th, material) => ApplyMaterial({
                 input: Transform({
-                    input: Extrude({
-                        input: Polygon({ points: pts.map(p => [p[0] * MM, p[1] * MM]) }),
-                        height: th * MM,
-                    }),
+                    input: Extrude({ input: shape, height: th * MM }),
                     rotate: [90, 0, 0],
                     translate: [0, 0, z0 * MM],
                 }),
                 material,
             })
-            const disc = (r, z0, th, material, res, at = [0, 0]) => ApplyMaterial({
-                input: Transform({
-                    input: Cylinder({
-                        height: th * MM, radiusLow: r * MM,
-                        resolution: res, anchor: [0.5, 0, 0.5],
-                    }),
-                    rotate: [90, 0, 0],
-                    translate: [at[0] * MM, -at[1] * MM, z0 * MM],
-                }),
-                material,
-            })
+            const ringShape = (r0, r1, at, res) =>
+                Difference([circle2(r1, at, res), circle2(r0, at, res)])
 
-            // ---- §8 stack (z in mm, moon-plate top = 0, dial side toward +Z):
-            // moon plate 0.20 · clearance 0.05 · bank L 0.12 · clearance 0.05 · bank R 0.12
-            const zL = 0.05, zR = 0.22
-            const PLATE_R = 18.25                     // hardware bound: module OD ≤ 36.5 (§8)
+            // ---- one leaf: head + rim tab + hub collar, minus the bore ----
+            const leafSolid = (k, deg, z) => {
+                const hc = headCenter(deg)
+                const u = rot([0, 1], deg)              // hub -> head axis
+                const p = rot([1, 0], deg)              // lateral
+                const at = (r, s) => [PC[0] + u[0] * r + p[0] * s,
+                                      PC[1] + u[1] * r + p[1] * s]
+                const tab = [at(13.4, -TAB_W / 2), at(TAB_R, -TAB_W / 2),
+                             at(TAB_R, TAB_W / 2), at(13.4, TAB_W / 2)]
+                const solid = Difference([
+                    Union([
+                        circle2(R_MASK, hc, 96),
+                        poly2(tab),
+                        circle2(COLLAR_OUT, PC, 64),
+                    ]),
+                    circle2(COLLAR_IN, PC, 64),
+                ])
+                // the leaf is a SHADE: its cutout is that day's lit region, through
+                // which the one static champagne moon below shines. Near new moon
+                // the lit sliver is sub-stampable, so the leaf stays solid (full
+                // cover) — the day is dark anyway.
+                const shade = litFraction(k) > 0.003
+                    ? Difference([solid, poly2(litPoints(k).map(q => aboutHub(q, deg)))])
+                    : solid
+                return [extrude2(shade, z, FOIL, assets.leafPvd)]
+            }
 
-            const plate = disc(PLATE_R, -0.2, 0.2, assets.skyLacquer, 192)
-            const moonDisc = disc(R, 0, 0.01, assets.moonChampagne, 160)
-            const camRing = ApplyMaterial({
-                input: Transform({
-                    input: Extrude({
-                        input: Difference([
-                            Circle({ radius: PLATE_R * MM, resolution: 192 }),
-                            Circle({ radius: 16.4 * MM, resolution: 192 }),
-                        ]),
-                        height: 0.45 * MM,
-                    }),
-                    rotate: [90, 0, 0],
-                    translate: [0, 0, -0.65 * MM],
-                }),
-                material: assets.ringSteel,
-            })
+            // ---- magazine layout (spec §3): A = waiting (negative theta),
+            // B = used (positive theta); both spring-pressed to their mouths ----
+            const PT = PITCH        // pile pitch is a layout constant; the exploded
+                                    // view never touches it (it separates in Z only)
 
-            const blades = [
-                ...bladesL.map(pts => solidify(pts, zL, TH, assets.bladePvd)),
-                ...bladesR.map(pts => solidify(pts, zR, TH, assets.bladePvd)),
+            // ---- daily changeover (ruling R2), driven by the fraction of the day
+            // slot: the incoming leaf ARRIVES on top of the still-displayed one,
+            // and only then is the spent leaf EXTRACTED from under it — so the
+            // aperture is never uncovered. Magazine A advances a pitch as its
+            // mouth leaf leaves; B's stack settles a pitch as the new one lands.
+            const u = day * NL / SYN - kd          // 0..1 within the day slot
+            const CH_IN = 0.06, CH_OUT = 0.12
+            const sstep = t => {
+                const s = Math.max(0, Math.min(1, t))
+                return s * s * (3 - 2 * s)
+            }
+            const adv = sstep(u / CH_IN)                          // arrival progress
+            const rec = sstep((u - CH_IN) / (CH_OUT - CH_IN))     // exit progress
+            const hasPrev = kd > 0
+            const leafAngle = k => {
+                if (k === kd) return -MOUTH * (1 - adv)            // swinging in
+                if (hasPrev && k === kd - 1)                       // swinging out
+                    return MOUTH * rec
+                if (k > kd) return -(MOUTH + (k - kd - 1 + 1 - adv) * PT)   // fan A
+                return MOUTH + (kd - 1 - k - 1 + rec) * PT                  // fan B
+            }
+            // z: both piles REST ON THE CHAMBER FLOOR, so height is pile-local,
+            // not global rank: A holds kd+1..29 with the next leaf at the bottom
+            // (pulled out from under), B holds 0..kd-1 in day order with the last
+            // arrival on top (landed on top) — which is exactly the order fan A
+            // needs after the monthly block reset.
+            // The display station is angularly isolated (no other leaf is ever
+            // there), so the leaf rides a fixed ramp UP to the chamber top while
+            // displayed: constant, minimal viewing depth all month (ruling R5).
+            const Z_DISP = Z_TOPPLATE - 0.05 - FOIL
+            const Z_MOON_TOP = Z_DISP - 0.05      // static moon, 0.05 under the shade
+            const ZS = ZP + EXPL
+            const Z_SHOW = params.explode ? Z0 + NL * ZS : Z_DISP   // display station
+            const zArrive = Z_SHOW + FOIL + 0.02  // incoming waits one foil above
+            const liftP = sstep(Math.min(1, u / CH_IN * 1.6))   // ramp leads the swing
+            const leafZ = k => {
+                // The space beneath the display station is occupied by the static
+                // moon, so the incoming leaf rides the ramp OVER the displayed one
+                // (clearing the moon by a further foil); the spent leaf is then
+                // drawn out from underneath and the newcomer settles into place.
+                // Adjacent days' cutouts are nested, so the overlap always shows a
+                // valid phase and the aperture is never uncovered.
+                if (k === kd) return Z0 + (zArrive - Z0) * liftP
+                    - (zArrive - Z_SHOW) * rec
+                if (hasPrev && k === kd - 1)
+                    return Z_SHOW + (Z0 + (kd - 1) * ZS - Z_SHOW) * rec
+                if (k > kd) return Z0 + (k - kd - 1 + 1 - adv) * ZS   // A settles
+                return Z0 + k * ZS                                    // B, floor up
+            }
+            const leaves = []
+            for (let k = 0; k < NL; k++) {
+                leaves.push(...leafSolid(k, leafAngle(k), leafZ(k)))
+            }
+
+            // ---- module hardware (all inside the 1.4 mm slot: −0.96 … +0.35) ----
+            const Z_BOTGUIDE = Z0 - 0.10
+            const Z_BASE = Z_BOTGUIDE - 0.10
+            const Z_TOPP = Z_TOPPLATE + (params.explode ? NL * EXPL + 0.35 : 0)
+            const hub = extrude2(ringShape(BORE_R, 2.75, PC, 64), Z_BASE,
+                Z_TOPP + 0.10 - Z_BASE, assets.ringSteel)
+            const basePlate = extrude2(
+                Difference([circle2(PLATE_R, PC, 192), circle2(BORE_R, PC, 64)]),
+                Z_BASE, 0.10, assets.plateLacquer)
+            const bottomGuide = extrude2(ringShape(2.90, 14.6, PC, 160), Z_BOTGUIDE,
+                0.10, assets.plateLacquer)
+            // top guide plate carries the display opening (dial aperture, r 5.46)
+            const topGuide = extrude2(
+                Difference([ringShape(2.90, 14.6, PC, 160), circle2(5.55, [0, 0], 96)]),
+                Z_TOPP, 0.10, assets.plateLacquer)
+            // ---- helpers for fixed hardware ----
+            const atPolar = (deg, r, s) => {
+                const u = rot([0, 1], deg), p = rot([1, 0], deg)
+                return [PC[0] + u[0] * r + p[0] * (s || 0),
+                        PC[1] + u[1] * r + p[1] * (s || 0)]
+            }
+            const sector = (r0, r1, a0, a1, res) => {
+                const pts = []
+                for (let i = 0; i <= res; i++) pts.push(atPolar(a0 + (a1 - a0) * i / res, r1))
+                for (let i = res; i >= 0; i--) pts.push(atPolar(a0 + (a1 - a0) * i / res, r0))
+                return poly2(pts)
+            }
+            const toothWheel = (at, rOut, rIn, n) => {
+                const pts = []
+                for (let t = 0; t < 2 * n; t++) {
+                    const a = Math.PI * t / n, rr = (t % 2 === 0) ? rOut : rIn
+                    pts.push([at[0] + rr * Math.cos(a), at[1] + rr * Math.sin(a)])
+                }
+                return poly2(pts)
+            }
+            const zChamberH = Z_DISP + FOIL - Z0
+
+            // ---- peripheral drive band (R3): transfer ring with rim teeth and the
+            // two pawl fingers that sweep the empty gap sector between the mouths
+            const RIM_TEETH = 72
+            const finger = deg => poly2([atPolar(deg, 14.4, -0.35), atPolar(deg, 16.2, -0.35),
+                                         atPolar(deg, 16.2, 0.35), atPolar(deg, 14.4, 0.35)])
+            const rimTeeth = []
+            for (let t = 0; t < RIM_TEETH; t++) {
+                const a = 360 * t / RIM_TEETH
+                rimTeeth.push(poly2([atPolar(a, RING_OUT - 0.05, -0.28),
+                                     atPolar(a, RING_OUT + 0.22, 0),
+                                     atPolar(a, RING_OUT - 0.05, 0.28)]))
+            }
+            const transferRing = extrude2(
+                Union([ringShape(RING_IN, RING_OUT, PC, 192), finger(0), finger(-MOUTH),
+                       ...rimTeeth]),
+                Z0 + 0.34, 0.10, assets.steelBright)
+
+            // ---- magazine mouth stops: posts that catch the tabs (only the tabs
+            // reach r 14.9; the heads stop at 14.35) ----
+            const stops = [MOUTH, -MOUTH].map(deg => extrude2(
+                circle2(0.30, atPolar(deg, STOP_R), 20), Z0 - 0.02, zChamberH + 0.04,
+                assets.giltBrass))
+
+            // ---- magazine springs: curved leaf springs pressing each pile toward
+            // its mouth, anchored at the deep end of the fan ----
+            const deepA = -(MOUTH + (NL - 1) * PITCH), deepB = MOUTH + (NL - 1) * PITCH
+            const springs = [[deepA, -22], [deepB, 22]].map(([a0, sweep]) => extrude2(
+                Union([sector(11.9, 12.25, a0, a0 + sweep, 24),
+                       circle2(0.45, atPolar(a0 + sweep, 12.07), 16)]),
+                Z0 + 0.05, zChamberH - 0.1, assets.giltBrass))
+
+            // ---- registration jumper at the display station: sprung lever seating
+            // the display tab (the module's single precision joint) ----
+            const jumper = extrude2(
+                Union([poly2([atPolar(0, 14.35, -0.55), atPolar(0, 15.9, -0.30),
+                              atPolar(0, 15.9, 0.30), atPolar(0, 14.35, 0.55)]),
+                       sector(15.4, 15.75, 3, 26, 12),
+                       circle2(0.40, atPolar(26, 15.57), 16)]),
+                Z0 + 0.14, 0.10, assets.giltBrass)
+
+            // ---- the ONE static moon: galvanic champagne disc at the display
+            // station, carried on a short pillar from the chamber floor. Every
+            // shade flies over it (the ramp lifts them clear before they reach the
+            // station), and each day's cutout lets exactly that day's lit region
+            // shine through — one gold surface for the whole complication.
+            const moonDisc = extrude2(circle2(R, [0, 0], 160), Z_MOON_TOP - 0.12, 0.12,
+                assets.moonChampagne)
+            const moonPost = extrude2(circle2(1.8, [0, 0], 32), Z0, Z_MOON_TOP - 0.12 - Z0,
+                assets.ringSteel)
+
+            // ---- R5 lift ramp: raises the incoming shade from fan A's floor to
+            // above the display station — leading the angular swing, so the leaf is
+            // clear of the static moon well before it arrives ----
+            // The lift acts on the leaf's COLLAR, as a helical track on the hub
+            // sleeve (r 2.9–3.5): the only band that clears the static moon, whose
+            // near edge is 3.7 from the hub. It stops short of the station (−12°),
+            // by which point the leaf is fully raised and settles onto its seat.
+            const RAMP_END = -12
+            const rampSteps = []
+            for (let i = 0; i < 14; i++) {
+                const span = MOUTH + RAMP_END
+                const a0 = -MOUTH + span * i / 14, a1 = -MOUTH + span * (i + 1) / 14
+                // top face stays 0.025 under the leaf it carries, never above it
+                const h = 0.03 + (zArrive - 0.035 - Z0)
+                    * sstep(Math.min(1, (i + 1) / 14 * 1.6))
+                // steel, not gilt: this track encircles the bore and is the one
+                // drive part that can be glimpsed from the front
+                rampSteps.push(extrude2(sector(2.9, 3.5, a0, a1 + 0.6, 4), Z0 - 0.02, h,
+                    assets.steelBright))
+            }
+
+            // ---- drive train (spec §7): 59-tooth program star, its advance finger
+            // from the movement's date train, and the 16-position leap cam ----
+            const starAt = atPolar(148, 15.4)
+            const leapAt = atPolar(-148, 15.4)
+            const dressing = [
+                extrude2(toothWheel(starAt, 2.60, 2.25, 59), Z0 + 0.02, 0.09, assets.giltBrass),
+                extrude2(circle2(0.5, starAt, 16), Z0 - 0.02, 0.16, assets.ringSteel),
+                extrude2(toothWheel(leapAt, 1.90, 1.55, 16), Z0 + 0.02, 0.09, assets.giltBrass),
+                extrude2(circle2(0.45, leapAt, 16), Z0 - 0.02, 0.16, assets.ringSteel),
+                // date-train finger reaching the star
+                extrude2(poly2([[starAt[0] - 0.35, starAt[1] + 2.2],
+                                [starAt[0] + 0.35, starAt[1] + 2.4],
+                                [starAt[0] + 1.9, starAt[1] + 5.3],
+                                [starAt[0] + 1.0, starAt[1] + 5.5]]),
+                    Z0 + 0.13, 0.09, assets.giltBrass),
             ]
-            return Group([plate, camRing, moonDisc, ...blades])
+
+            const parts = [basePlate, bottomGuide, hub, transferRing, ...stops,
+                ...springs, jumper, ...rampSteps, ...dressing, moonPost, moonDisc,
+                ...leaves]
+            if (!params.revealMechanism) parts.push(topGuide)
+            return Group(parts)
         produces: MESHES
 main.moon.webp: !!binary |
-    UklGRioLAABXRUJQVlA4WAoAAAAwAAAA/wAA/wAASUNDUMgBAAAAAAHIAAAAAAQw
+    UklGRnoLAABXRUJQVlA4WAoAAAAwAAAA/wAA/wAASUNDUMgBAAAAAAHIAAAAAAQw
     AABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAA
     AAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAA
@@ -633,41 +820,43 @@ main.moon.webp: !!binary |
     SFVHgVTyU8Daz0RrcxNpJS8FvKuTjlhyEoihuZjAfHYRqaE5yOA+Owjk0A6bwD4d
     VaCu4zcflKEuqstQF9VNUJclpJumSMtmZsoymoy2ky3vggIMr3WfDzUA28NvffjN
     DwyITLfLJC+owF45QGbdCzpXecNVHTC8qQOGRR0wNnXAtakDru0rRRKGqzpgWNQB
-    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
+    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
+    Q756gbQXjemgH+IAAAAAAAAA
