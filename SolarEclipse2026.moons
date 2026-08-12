@@ -43,20 +43,13 @@ main.moon: |
         Data: Natural Earth 110m land polygons (public domain), published
         eclipse circumstances (eclipse.gsfc.nasa.gov / eclipsewise.com).
     params:
-        earthRadius:
-            default: 0.5
-            doc: |
-                Earth radius in meters (scene scale).
-            category: Scale
-            min: 0.2
-            max: 1
         time:
             default: 0
             label: Time
             doc: |
-                Minutes from greatest eclipse (17:46 UTC). The umbra races
-                its whole track - local sunrise in Siberia to local sunset
-                over the Balearics - in these 93 minutes (~1.8 km/s).
+                Minutes from greatest eclipse (17:46 UTC). The umbra crosses
+                its whole track - Siberian sunrise to Balearic sunset - in
+                these 93 minutes.
             category: Time
             min: -46
             max: 46
@@ -64,8 +57,8 @@ main.moon: |
         distanceRealism:
             default: 0.22
             doc: |
-                Distance compression: 1 = true scale, smaller pulls Moon and
-                Sun closer (far things more). Sizes follow automatically.
+                Distance compression: 1 = true scale; lower values pull the
+                distant Sun in more than the nearby Moon. Sizes follow.
             category: Scale
             min: 0.15
             max: 1
@@ -329,7 +322,7 @@ main.moon: |
         # normals; pole cells drop their degenerate sliver triangle.
         earth:
             expression: |
-                const RE = params.earthRadius
+                const RE = 0.5
                 const GH = 73, GW = 145
                 const [gu, gv] = Coords({ shape: [GH, GW], normalize: true })
                 const glat = (0.5 - gv) * Math.PI
@@ -360,7 +353,7 @@ main.moon: |
             expression: |
                 const rad = a => a * Math.PI / 180
                 const ec = assets.eclipse
-                const R = params.earthRadius
+                const R = 0.5
                 const toXyz = (lat, lon, r) => {
                     const p = rad(lat), l = rad(lon)
                     return [r * Math.cos(p) * Math.cos(l), r * Math.sin(p), -r * Math.cos(p) * Math.sin(l)]
@@ -400,7 +393,7 @@ main.moon: |
             expression: |
                 const rad = a => a * Math.PI / 180
                 const ec = assets.eclipse
-                const R = params.earthRadius
+                const R = 0.5
                 const toXyz = ([lat, lon], r) => {
                     const p = rad(lat), l = rad(lon)
                     return [r * Math.cos(p) * Math.cos(l), r * Math.sin(p), -r * Math.cos(p) * Math.sin(l)]
@@ -450,7 +443,7 @@ main.moon: |
             expression: |
                 const ec = assets.eclipse
                 const rad = a => a * Math.PI / 180
-                const r = params.earthRadius * 1.012
+                const r = 0.5 * 1.012
                 const p = rad(ec.geLat), l = rad(ec.geLon)
                 const pos = [r * Math.cos(p) * Math.cos(l), r * Math.sin(p), -r * Math.cos(p) * Math.sin(l)]
                 return ApplyMaterial({
@@ -469,7 +462,7 @@ main.moon: |
             expression: |
                 const rad = a => a * Math.PI / 180
                 const ec = assets.eclipse
-                const R = params.earthRadius
+                const R = 0.5
                 // one knob, both bodies: scene distance = R * (eclipse-day true
                 // distance in Earth radii) ^ p along the axis; p = 1 is exact.
                 // 57.12 / 23782 are the distances the real cone angle implies
@@ -614,7 +607,7 @@ main.moon: |
                 if (!params.showDistances) return []
                 const rad = a => a * Math.PI / 180
                 const ec = assets.eclipse
-                const R = params.earthRadius
+                const R = 0.5
                 const p = params.distanceRealism
                 const moonDist = R * 57.12 ** p
                 const sunDist = R * 23782 ** p
