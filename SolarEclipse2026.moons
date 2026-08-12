@@ -1,0 +1,5930 @@
+# moons v1
+main.moon: |
+    moon: "1.0"
+    doc: |
+        Total Solar Eclipse of 12 August 2026 — computed from real data.
+        A miniature Earth wearing a computed texture: filled Natural Earth
+        continents, the real day/night terminator at the moment of greatest
+        eclipse (the eclipse ends at sunset over Spain), and the swept region
+        of partial visibility shaded amber per-pixel from the moving penumbra.
+        The path of totality is computed geometry: the central line (red tube)
+        and the totality band at its true ~300 km ground width, sunrise in
+        northern Siberia to sunset over the Balearics. Moon and Sun sit along
+        the true shadow-axis direction — visibly grazing the Earth near the
+        pole (gamma 0.898), which is why the path runs so far north.
+
+        The math: shadow-axis elements in the Besselian frame. d and mu
+        (axis declination / Greenwich hour angle) are computed per-minute
+        from a solar ephemeris (~0.01 deg). The axis track x(t), y(t) is
+        derived in-code from the published circumstances of this eclipse
+        (NASA/EclipseWise: greatest eclipse 17:46:01 UT at 65.2N 25.2W,
+        gamma 0.8977, central duration ~16:59-18:33 UT, penumbra radius
+        0.536, effective umbra radius 0.0105 Earth radii) — a low-precision
+        lunar ephemeris cannot place a 300 km shadow, so the published
+        circumstances stand in for the high-precision part, exactly the job
+        Besselian elements do. Everything downstream is computed: central
+        line, band width, partial region, contact times. Self-checks verify
+        computed gamma, the GE round-trip, and the penumbral contact times
+        P1/P4 against the independent published 15:34 / 19:57 UT — broken
+        math refuses to render.
+        The `time` param scrubs through the central eclipse (umbra on the
+        surface, ~17:00-18:33 UTC): Moon, Sun, shadow cones, footprints,
+        terminator and labels all move along the computed track (default 0 =
+        greatest eclipse, 17:46:01 UTC); the red band and the amber shading
+        stay as the whole-event summary.
+
+        Proportions: distances are compressed so all three bodies share one
+        view (the legend plaque shows the computed factors), but the Moon and
+        Sun sizes are DERIVED from the real umbral cone angle at those
+        compressed distances: one straight cone runs from the computed umbra
+        footprint, encloses the Moon's limb tangentially, and continues to
+        meet the Sun's limb exactly - both bodies keep their true ~0.5 degree
+        angular size as seen from the eclipse point.
+        Data: Natural Earth 110m land polygons (public domain), published
+        eclipse circumstances (eclipse.gsfc.nasa.gov / eclipsewise.com).
+    params:
+        earthRadius:
+            default: 0.5
+            doc: |
+                Earth radius in meters (scene scale).
+            category: Scale
+            min: 0.2
+            max: 1
+        time:
+            default: 0
+            label: Time
+            doc: |
+                Minutes from greatest eclipse (17:46 UTC). The umbra races
+                its whole track - local sunrise in Siberia to local sunset
+                over the Balearics - in these 93 minutes (~1.8 km/s).
+            category: Time
+            min: -46
+            max: 46
+            step: 1
+        distanceRealism:
+            default: 0.22
+            doc: |
+                Distance compression: 1 = true scale, smaller pulls Moon and
+                Sun closer (far things more). Sizes follow automatically.
+            category: Scale
+            min: 0.15
+            max: 1
+            step: 0.01
+        showShadowCones:
+            default: true
+            kind: boolean
+            doc: |
+                Show the umbra/penumbra cones and the tangent light cone.
+            category: Eclipse
+        showSunlight:
+            default: true
+            kind: boolean
+            doc: |
+                Show the sunlight envelope hugging the day side.
+            category: Eclipse
+        showDistances:
+            default: true
+            kind: boolean
+            doc: |
+                Show the labeled Moon and Sun distance lines.
+            category: Eclipse
+    assets:
+        # Natural Earth 110m land polygons: one closed ring per ring id.
+        land:
+            import: ./assets/land.csv
+
+        # ── THE ECLIPSE ── shadow-axis elements and everything derived from
+        # them, in one DATA record so texture and geometry can never disagree.
+        # Scene frame: x = cos(lat) cos(lon), y = sin(lat), z = -cos(lat) sin(lon)
+        # (Greenwich on +X, north up).
+        eclipse:
+            expression: |
+                const rad = a => a * Math.PI / 180
+                const deg = r => r * 180 / Math.PI
+                const wrap360 = a => ((a % 360) + 360) % 360
+                const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+                const dirV = (lat, lon) => {
+                    const p = rad(lat), l = rad(lon)
+                    return [Math.cos(p) * Math.cos(l), Math.sin(p), -Math.cos(p) * Math.sin(l)]
+                }
+
+                // Published circumstances (NASA / EclipseWise), the anchors:
+                const GE = { lat: 65.2, lon: -25.2, gamma: 0.8977, utc: 17.7669 }  // 17:46:01 UT
+                const centralHalfHours = 0.78   // central eclipse ~16:59 -> ~18:33 UT
+                const l1 = 0.536                // penumbra radius on the fundamental plane (Earth radii)
+                const l2u = 0.0105              // effective umbral half-width (|l2| + zeta tanF2)
+                const tanF2 = 0.00459           // umbral cone half-angle (tan), NASA elements
+
+                // Days from J2000.0 at tau hours from greatest eclipse
+                // (2026-08-12 00:00 UT = J2000 + 9719.5 d)
+                const D0 = 9719.5 + GE.utc / 24
+
+                // Solar ephemeris (good to ~0.01 deg): RA, dec, GMST at tau
+                const sunEq = tau => {
+                    const D = D0 + tau / 24
+                    const g = rad(wrap360(357.528 + 0.9856003 * D))
+                    const lam = wrap360(280.460 + 0.9856474 * D) + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)
+                    const eps = 23.439 - 0.0000004 * D
+                    const sl = Math.sin(rad(lam)), cl = Math.cos(rad(lam))
+                    const se = Math.sin(rad(eps)), ce = Math.cos(rad(eps))
+                    return [wrap360(deg(Math.atan2(sl * ce, cl))), deg(Math.asin(sl * se)),
+                            wrap360(280.46061837 + 360.98564736629 * D)]
+                }
+                // Fundamental-plane basis in the scene frame at tau: zhat toward
+                // the Sun, yhat north-perpendicular, xhat east. d = axis
+                // declination, mu = its Greenwich hour angle (subsolar lon = -mu).
+                const frame = tau => {
+                    const [ra, dec, gmst] = sunEq(tau)
+                    const mu = wrap360(gmst - ra)
+                    const d = rad(dec), m = rad(mu)
+                    return {
+                        xhat: [Math.sin(m), 0, -Math.cos(m)],
+                        yhat: [-Math.sin(d) * Math.cos(m), Math.cos(d), -Math.sin(d) * Math.sin(m)],
+                        zhat: [Math.cos(d) * Math.cos(m), Math.sin(d), Math.cos(d) * Math.sin(m)],
+                        d: dec, mu,
+                    }
+                }
+
+                // Shadow-axis track: project the published GE point into the
+                // fundamental plane at tau = 0 -> (xg, yg); the axis velocity is
+                // perpendicular to that offset (definition of greatest eclipse),
+                // eastward, sized by the central duration.
+                const f0 = frame(0)
+                const P = dirV(GE.lat, GE.lon)
+                const xg = dot(P, f0.xhat), yg = dot(P, f0.yhat), zg = dot(P, f0.zhat)
+                const gamma = Math.hypot(xg, yg)
+                if (Math.abs(gamma - GE.gamma) > 0.02)
+                    throw new Error(`derived gamma ${gamma.toFixed(4)} vs published 0.8977 - ephemeris or frame math broken`)
+                if (zg <= 0)
+                    throw new Error("greatest-eclipse point landed on the night side - frame sign error")
+                const vmag = Math.sqrt(1 - gamma * gamma) / centralHalfHours
+                const vx = vmag * yg / gamma, vy = -vmag * xg / gamma
+                const nx = -vy / vmag, ny = vx / vmag   // path normal (north side)
+
+                // Ground point under the shadow axis at tau, offset e Earth radii
+                // perpendicular to the track (e = +-l2u gives the totality limits;
+                // the slanted sphere projection stretches it to the true width).
+                const project = (tau, e) => {
+                    const f = frame(tau)
+                    const x = xg + vx * tau + e * nx, y = yg + vy * tau + e * ny
+                    const zz = 1 - x * x - y * y
+                    if (zz <= 0) return null
+                    const z = Math.sqrt(zz)
+                    const p = [0, 1, 2].map(i => x * f.xhat[i] + y * f.yhat[i] + z * f.zhat[i])
+                    return [deg(Math.asin(p[1])), deg(Math.atan2(-p[2], p[0]))]
+                }
+                // Self-check: tau = 0 must round-trip to the published GE point
+                const back = project(0, 0)
+                if (Math.abs(back[0] - GE.lat) > 0.3 || Math.abs(wrap360(back[1] - GE.lon + 180) - 180) > 0.6)
+                    throw new Error(`GE round-trip gave ${back[0].toFixed(1)}, ${back[1].toFixed(1)} - projection math broken`)
+                // Self-check: penumbral contacts P1/P4 (|r| = 1 + l1) against the
+                // INDEPENDENT published times 15:34 / 19:57 UT.
+                const rAt = tau => Math.hypot(xg + vx * tau, yg + vy * tau)
+                let p1 = null, p4 = null
+                for (let tau = -3.5; tau <= 3.5; tau += 0.005) {
+                    if (rAt(tau) < 1 + l1) { if (p1 === null) p1 = tau; p4 = tau }
+                }
+                if (p1 === null || Math.abs(GE.utc + p1 - 15.57) > 0.4 || Math.abs(GE.utc + p4 - 19.95) > 0.4)
+                    throw new Error(`computed P1/P4 = ${(GE.utc + p1).toFixed(2)} / ${(GE.utc + p4).toFixed(2)} UT vs published 15.57 / 19.95 - track math broken`)
+
+                // Central line and totality limits (paired, for the band strip)
+                const path = [], bandN = [], bandS = []
+                const NS = 72
+                for (let k = 0; k <= NS; k++) {
+                    const tau = -centralHalfHours + 2 * centralHalfHours * k / NS
+                    const c = project(tau, 0)
+                    if (!c) continue
+                    path.push(c)
+                    const n2 = project(tau, l2u), s2 = project(tau, -l2u)
+                    if (n2 && s2) { bandN.push(n2); bandS.push(s2) }
+                }
+                if (path.length < 40)
+                    throw new Error(`only ${path.length} central-line points projected - track math broken`)
+
+                // ── THE INSTANT SHOWN ── everything below is evaluated at the
+                // time param (minutes from greatest eclipse): axis position,
+                // frame, the anchor point under the axis, and the instantaneous
+                // footprints - circles of radius l1 (penumbra) / l2u (umbra)
+                // around the shadow axis, projected onto the sphere. Where the
+                // penumbra circle leaves the Earth it is clamped to the limb -
+                // which in this frame IS the terminator, so the partial zone is
+                // correctly bounded by the sunrise/sunset line.
+                const tauNow = params.time / 60
+                const fT = frame(tauNow)
+                const xT = xg + vx * tauNow, yT = yg + vy * tauNow
+                const rT = Math.hypot(xT, yT)
+                const zetaT = rT < 1 ? Math.sqrt(1 - rT * rT) : 0
+                // scene-frame unit anchor: the point under the shadow axis (on
+                // the surface while the umbra touches, else on the fundamental
+                // plane beside the limb)
+                const anchor = [0, 1, 2].map(i => xT * fT.xhat[i] + yT * fT.yhat[i] + zetaT * fT.zhat[i])
+                const outlineT = (radius, n) => {
+                    const pts = []
+                    for (let k = 0; k < n; k++) {
+                        const th = 2 * Math.PI * k / n
+                        let u = xT + radius * Math.cos(th), v = yT + radius * Math.sin(th)
+                        const r2 = u * u + v * v
+                        if (r2 > 0.9999) { const s = Math.sqrt(0.9999 / r2); u *= s; v *= s }
+                        const z = Math.sqrt(Math.max(0, 1 - u * u - v * v))
+                        const p = [0, 1, 2].map(i => u * fT.xhat[i] + v * fT.yhat[i] + z * fT.zhat[i])
+                        pts.push([deg(Math.asin(p[1])), deg(Math.atan2(-p[2], p[0]))])
+                    }
+                    return pts
+                }
+                const penumbraOutline = rT - l1 < 0.999 ? outlineT(l1, 144) : []
+                const umbraOutline = rT - l2u < 0.999 ? outlineT(l2u, 72) : []
+
+                // Time samples for the per-pixel partial shading (P1 to P4)
+                const samples = []
+                for (let tau = -2.3; tau <= 2.31; tau += 0.2) {
+                    const f = frame(tau)
+                    samples.push([xg + vx * tau, yg + vy * tau, f.d, f.mu])
+                }
+
+                const subLon = wrap360(-fT.mu + 180) - 180
+                return { geLat: GE.lat, geLon: GE.lon, gamma, subLat: fT.d, subLon,
+                         anchor, touching: zetaT > 0,
+                         l1, l2u, tanF2, path, bandN, bandS, samples, penumbraOutline, umbraOutline }
+
+        # ── THE TEXTURE ── filled Natural Earth continents, day/night at the
+        # moment of greatest eclipse, and the swept partial-visibility region
+        # shaded amber per-pixel: max eclipse magnitude over the P1-P4 samples,
+        # each gated to that instant's day side. (Totality is geometry, not
+        # texture: at 0.0105 Earth radii the umbra falls between time samples.)
+        earthTex:
+            expression: |
+                const rad = a => a * Math.PI / 180
+                const ec = assets.eclipse
+                // land mask: rings filled by the nonzero winding rule
+                const ringIds = Array.from(assets.land.col("ring"), Number)
+                const llon = Array.from(assets.land.col("lon"), Number)
+                const llat = Array.from(assets.land.col("lat"), Number)
+                const ringPts = []
+                let cur = null, curId = -1
+                for (let i = 0; i < ringIds.length; i++) {
+                    if (ringIds[i] !== curId) { cur = []; ringPts.push(cur); curId = ringIds[i] }
+                    cur.push([llon[i], llat[i]])
+                }
+                const TH = 360, TW = 720
+                const landImg = Rasterize({
+                    input: Group(ringPts.map(p => Polygon({ points: p }))),
+                    size: [TH, TW], region: [[-180, -90], [180, 90]],
+                    fill: [1, 1, 1], background: [0, 0, 0], antialias: true,
+                })
+                const landF = Split({ input: landImg.values, axis: 2 })[0]
+                const landFrac = Mean({ input: landF, axis: null })
+                if (landFrac < 0.15 || landFrac > 0.5)
+                    throw new Error(`land mask covers ${(landFrac * 100).toFixed(0)}% of the map - land.csv or the rasterization is broken`)
+                // pixel direction field (texture row 0 = lat -90; mesh flips V)
+                const [tx, ty] = Coords({ shape: [TH, TW], normalize: true })
+                const plat = (ty - 0.5) * Math.PI
+                const plon = tx * (2 * Math.PI) - Math.PI
+                const cosLat = Cos(plat)
+                const px = cosLat * Cos(plon), py = Sin(plat), pz = cosLat * Sin(plon) * -1
+                // day/night at greatest eclipse (subsolar point from the ephemeris)
+                const sp = rad(ec.subLat), sl = rad(ec.subLon)
+                const sub = [Math.cos(sp) * Math.cos(sl), Math.sin(sp), -Math.cos(sp) * Math.sin(sl)]
+                const dayF = Smoothstep({ input: px * sub[0] + py * sub[1] + pz * sub[2], edge0: -0.08, edge1: 0.08 })
+                // max eclipse magnitude over the time samples
+                let mag = Zeros({ shape: [TH, TW] })
+                for (const row of ec.samples) {
+                    const [x, y, dd, mu] = row
+                    const d = rad(dd), m = rad(mu)
+                    const xh = [Math.sin(m), 0, -Math.cos(m)]
+                    const yh = [-Math.sin(d) * Math.cos(m), Math.cos(d), -Math.sin(d) * Math.sin(m)]
+                    const zh = [Math.cos(d) * Math.cos(m), Math.sin(d), Math.cos(d) * Math.sin(m)]
+                    const dx = px * xh[0] + py * xh[1] + pz * xh[2] - x
+                    const dy = px * yh[0] + py * yh[1] + pz * yh[2] - y
+                    const zp = px * zh[0] + py * zh[1] + pz * zh[2]
+                    const m1 = (ec.l1 - Sqrt(dx * dx + dy * dy)) / (ec.l1 + ec.l2u)
+                    mag = Maximum({ input: mag, other: m1 * Step({ input: zp, edge: 0 }) })
+                }
+                mag = Clamp({ input: mag, min: 0, max: 1 })
+                // colors: day/night base, amber partial shading on top
+                const oceanD = [0.20, 0.42, 0.66], landD = [0.52, 0.60, 0.47]
+                const oceanN = [0.07, 0.10, 0.18], landN = [0.14, 0.16, 0.17]
+                const amber = [1, 0.62, 0.1]
+                const tPart = mag ** 1.6 * 0.55
+                const chan = i => Mix({
+                    input: Mix({
+                        input: Mix({ input: oceanN[i], target: landN[i], t: landF }),
+                        target: Mix({ input: oceanD[i], target: landD[i], t: landF }),
+                        t: dayF,
+                    }),
+                    target: amber[i], t: tPart,
+                })
+                return Image(StackAxis({ input: [chan(0), chan(1), chan(2)], axis: 2 }))
+            produces: IMAGE
+        earthMaterial:
+            op: Material
+            with:
+                color:
+                    asset: earthTex
+                roughness:
+                    expression: |
+                        return Image(Fill({ value: 0.7, shape: [8, 8] }))
+                    produces: IMAGE
+
+        # The globe: lon/lat vertex grid with equirect UVs and exact radial
+        # normals; pole cells drop their degenerate sliver triangle.
+        earth:
+            expression: |
+                const RE = params.earthRadius
+                const GH = 73, GW = 145
+                const [gu, gv] = Coords({ shape: [GH, GW], normalize: true })
+                const glat = (0.5 - gv) * Math.PI
+                const gang = gu * (2 * Math.PI) - Math.PI
+                const gCosLat = Cos(glat)
+                const gx = gCosLat * Cos(gang), gy = Sin(glat), gz = gCosLat * Sin(gang) * -1
+                const gtris = []
+                for (let r = 0; r < GH - 1; r++) {
+                    for (let c = 0; c < GW - 1; c++) {
+                        const a = r * GW + c, b = a + 1, d = a + GW, e = d + 1
+                        if (r < GH - 2) gtris.push([a, d, e])
+                        if (r > 0) gtris.push([a, e, b])
+                    }
+                }
+                return Mesh({
+                    vertices: Reshape({ input: StackAxis({ input: [gx * RE, gy * RE, gz * RE], axis: 2 }), newShape: [GH * GW, 3] }),
+                    triangles: gtris,
+                    normals: Reshape({ input: StackAxis({ input: [gx, gy, gz], axis: 2 }), newShape: [GH * GW, 3] }),
+                    materialUVs: Reshape({ input: StackAxis({ input: [gu, 1 - gv], axis: 2 }), newShape: [GH * GW, 2] }),
+                    material: assets.earthMaterial,
+                })
+            produces: MESHES
+
+        # ── PATH GEOMETRY ── computed central line (tube) and the totality
+        # band at its true ground width (a double-sided strip between the
+        # computed north/south limits), draped just above the surface.
+        pathGeometry:
+            expression: |
+                const rad = a => a * Math.PI / 180
+                const ec = assets.eclipse
+                const R = params.earthRadius
+                const toXyz = (lat, lon, r) => {
+                    const p = rad(lat), l = rad(lon)
+                    return [r * Math.cos(p) * Math.cos(l), r * Math.sin(p), -r * Math.cos(p) * Math.sin(l)]
+                }
+                const parts = []
+                // totality band strip between the computed limits
+                const N = ec.bandN.length
+                const verts = [], tris = [], norms = []
+                for (let k = 0; k < N; k++) {
+                    const [an, on] = ec.bandN[k]
+                    const [as2, os] = ec.bandS[k]
+                    verts.push(toXyz(an, on, R * 1.004), toXyz(as2, os, R * 1.004))
+                    norms.push(toXyz(an, on, 1), toXyz(as2, os, 1))
+                    if (k > 0) {
+                        const a = 2 * (k - 1), b = a + 1, c = a + 2, d = a + 3
+                        tris.push([a, c, b], [b, c, d], [a, b, c], [b, d, c])  // double-sided
+                    }
+                }
+                parts.push(ApplyMaterial({
+                    input: Mesh({ vertices: verts, triangles: tris, normals: norms }),
+                    material: Material({ color: [0.95, 0.25, 0.1, 0.85], roughness: 0.7 }),
+                }))
+                // central line tube
+                const path = ec.path.map(([lat, lon]) => toXyz(lat, lon, R * 1.007))
+                parts.push(ApplyMaterial({
+                    input: Sweep({ input: Circle({ radius: 0.004, resolution: 12 }), path, resolution: 1 }),
+                    material: Material({ color: [0.6, 0.03, 0.03, 1], roughness: 0.5 }),
+                }))
+                return Group(parts)
+            produces: MESHES
+        # ── FOOTPRINTS ── the computed intersection of the shadow cones with
+        # the surface at the instant of greatest eclipse: the penumbra oval
+        # (amber ring, limb-clamped where it slides off the day side) and the
+        # umbra ellipse (dark ring + filled patch, ~300 km, stretched by the
+        # grazing incidence).
+        footprints:
+            expression: |
+                const rad = a => a * Math.PI / 180
+                const ec = assets.eclipse
+                const R = params.earthRadius
+                const toXyz = ([lat, lon], r) => {
+                    const p = rad(lat), l = rad(lon)
+                    return [r * Math.cos(p) * Math.cos(l), r * Math.sin(p), -r * Math.cos(p) * Math.sin(l)]
+                }
+                const parts = []
+                // penumbra boundary ring (absent before P1 / after P4)
+                if (ec.penumbraOutline.length > 2)
+                    parts.push(ApplyMaterial({
+                        input: Sweep({
+                            input: Circle({ radius: 0.0035, resolution: 12 }),
+                            path: ec.penumbraOutline.map(p => toXyz(p, R * 1.005)),
+                            resolution: 1, closed: true,
+                        }),
+                        material: Material({ color: [1, 0.72, 0.15, 1], roughness: 0.5 }),
+                    }))
+                // umbra footprint: filled dark ellipse + thin outline (only while
+                // the umbra actually touches the surface)
+                if (ec.touching && ec.umbraOutline.length > 2) {
+                    const ring = ec.umbraOutline.map(p => toXyz(p, R * 1.0055))
+                    const center = [...ec.anchor].map(c => c * R * 1.0055)
+                    const verts = [center, ...ring]
+                    const tris = []
+                    for (let k = 0; k < ring.length; k++) {
+                        const a = 1 + k, b = 1 + (k + 1) % ring.length
+                        tris.push([0, a, b], [0, b, a])   // double-sided fan
+                    }
+                    parts.push(ApplyMaterial({
+                        input: Mesh({ vertices: verts, triangles: tris }),
+                        material: Material({ color: [0.08, 0.06, 0.1, 0.95], roughness: 0.8 }),
+                    }))
+                    parts.push(ApplyMaterial({
+                        input: Sweep({
+                            input: Circle({ radius: 0.0018, resolution: 8 }),
+                            path: ec.umbraOutline.map(p => toXyz(p, R * 1.006)),
+                            resolution: 1, closed: true,
+                        }),
+                        material: Material({ color: [0.05, 0.04, 0.08, 1], roughness: 0.6 }),
+                    }))
+                }
+                if (parts.length === 0) return []
+                return Group(parts)
+            produces: MESHES
+        geMarker:
+            doc: |
+                Gold marker at the point of greatest eclipse (65.2N 25.2W,
+                17:46:01 UT, totality 2m18s).
+            expression: |
+                const ec = assets.eclipse
+                const rad = a => a * Math.PI / 180
+                const r = params.earthRadius * 1.012
+                const p = rad(ec.geLat), l = rad(ec.geLon)
+                const pos = [r * Math.cos(p) * Math.cos(l), r * Math.sin(p), -r * Math.cos(p) * Math.sin(l)]
+                return ApplyMaterial({
+                    input: Transform({ input: Sphere({ radius: 0.008, resolution: 24 }), translate: pos }),
+                    material: Material({ color: [1, 0.85, 0.2, 1], roughness: 0.3, metallic: 0.6 }),
+                })
+            produces: MESHES
+
+        # ── MOON & SUN ── on the true shadow-axis line through the greatest-
+        # eclipse point (the real grazing geometry of gamma 0.898). Sizes are
+        # DERIVED from the real umbral cone angle tanF2 at the compressed
+        # distances: one straight cone runs from the computed footprint,
+        # encloses the Moon's limb tangentially, and continues to meet the
+        # Sun's limb exactly - angular sizes stay true (~0.5 deg).
+        celestial:
+            expression: |
+                const rad = a => a * Math.PI / 180
+                const ec = assets.eclipse
+                const R = params.earthRadius
+                // one knob, both bodies: scene distance = R * (eclipse-day true
+                // distance in Earth radii) ^ p along the axis; p = 1 is exact.
+                // 57.12 / 23782 are the distances the real cone angle implies
+                // for the bodies' true radii (Moon near perigee - the reason
+                // this eclipse is total; Sun at 1.014 au): at p = 1 the Moon
+                // comes out at its true 0.273 Re and the Sun at 109.2 Re.
+                const moonDist = R * 57.12 ** params.distanceRealism
+                const sunDist = R * 23782 ** params.distanceRealism
+                const aOff = ec.l2u / ec.tanF2 * R   // umbra apex depth beyond the surface (scaled true)
+                const moonR = (aOff + moonDist) * ec.tanF2
+                const sunR = (aOff + sunDist) * ec.tanF2
+                const dirV = (lat, lon) => {
+                    const p = rad(lat), l = rad(lon)
+                    return [Math.cos(p) * Math.cos(l), Math.sin(p), -Math.cos(p) * Math.sin(l)]
+                }
+                const z = dirV(ec.subLat, ec.subLon)          // shadow-axis direction at the shown time
+                const gp = [...ec.anchor].map(c => c * R)     // point under the axis at the shown time
+                const at = (base, s) => [base[0] + z[0] * s, base[1] + z[1] * s, base[2] + z[2] * s]
+                const parts = []
+                parts.push(ApplyMaterial({
+                    input: Transform({ input: Sphere({ radius: moonR, resolution: 48 }), translate: at(gp, moonDist) }),
+                    material: Material({ color: [0.52, 0.51, 0.5, 1], roughness: 0.95 }),
+                }))
+                parts.push(ApplyMaterial({
+                    input: Transform({ input: Sphere({ radius: sunR, resolution: 48 }), translate: at(gp, sunDist) }),
+                    material: Material({ color: [1, 0.8, 0.15, 1], roughness: 0.25 }),
+                }))
+                // glow shell so the (now small, honestly-scaled) Sun still reads bright
+                parts.push(ApplyMaterial({
+                    input: Transform({ input: Sphere({ radius: sunR * 2, resolution: 32 }), translate: at(gp, sunDist) }),
+                    material: Material({ color: [1, 0.85, 0.35, 0.25], roughness: 0.6 }),
+                }))
+                if (params.showShadowCones) {
+                    const rotX = Math.acos(z[1]) * 180 / Math.PI
+                    const rotY = Math.atan2(z[0], z[2]) * 180 / Math.PI
+                    // the ONE tangent cone, unbroken: footprint -> Moon limb ->
+                    // Sun limb. Radius grows linearly at the real tanF2 the whole
+                    // way (at s: l2u*R + s*tanF2, which equals moonR at the Moon
+                    // and sunR at the Sun by construction).
+                    parts.push(ApplyMaterial({
+                        input: Transform({
+                            input: Cylinder({ height: sunDist, radiusLow: ec.l2u * R, radiusHigh: sunR, resolution: 32, anchor: [0.5, 0, 0.5] }),
+                            rotate: [rotX, rotY, 0], translate: gp,
+                        }),
+                        material: Material({ color: [0.22, 0.22, 0.3, 0.2], roughness: 0.9 }),
+                    }))
+                    // the umbra: the SAME cone's shadow segment (Moon down to the
+                    // footprint), darkened and nested a hair inside the envelope
+                    parts.push(ApplyMaterial({
+                        input: Transform({
+                            input: Cylinder({ height: moonDist, radiusLow: ec.l2u * R * 0.99, radiusHigh: moonR * 0.99, resolution: 32, anchor: [0.5, 0, 0.5] }),
+                            rotate: [rotX, rotY, 0], translate: gp,
+                        }),
+                        material: Material({ color: [0.08, 0.08, 0.14, 0.55], roughness: 0.9 }),
+                    }))
+                    // penumbra: a RULED sheet - one ray from each point of the
+                    // Moon's limb to the matching point of the computed footprint
+                    // ring, so it lands exactly on the amber outline. (A straight
+                    // cone cannot: the footprint curve is non-planar on the sphere,
+                    // and the compressed distances exaggerate any fixed slope.)
+                    if (ec.penumbraOutline.length > 2) {
+                    const d0 = rad(ec.subLat), mu0 = rad(-ec.subLon)
+                    const xh = [Math.sin(mu0), 0, -Math.cos(mu0)]
+                    const yh = [-Math.sin(d0) * Math.cos(mu0), Math.cos(d0), -Math.sin(d0) * Math.sin(mu0)]
+                    const moonC = at(gp, moonDist)
+                    const K = ec.penumbraOutline.length
+                    const pv = [], pt = [], pn = []
+                    for (let k = 0; k < K; k++) {
+                        const th = 2 * Math.PI * k / K
+                        const ct = Math.cos(th), st = Math.sin(th)
+                        const [la, lo] = ec.penumbraOutline[k]
+                        const q = rad(la), l = rad(lo)
+                        pv.push([R * 1.005 * Math.cos(q) * Math.cos(l), R * 1.005 * Math.sin(q), -R * 1.005 * Math.cos(q) * Math.sin(l)])
+                        pv.push([moonC[0] + (xh[0] * ct + yh[0] * st) * moonR,
+                                 moonC[1] + (xh[1] * ct + yh[1] * st) * moonR,
+                                 moonC[2] + (xh[2] * ct + yh[2] * st) * moonR])
+                        // explicit smooth normal (radial off the axis), shared by
+                        // both rails and both windings - avoids striped shading
+                        const nr = [xh[0] * ct + yh[0] * st, xh[1] * ct + yh[1] * st, xh[2] * ct + yh[2] * st]
+                        pn.push(nr, nr)
+                    }
+                    for (let k = 0; k < K; k++) {
+                        const a = 2 * k, b = a + 1, c = 2 * ((k + 1) % K), d2 = c + 1
+                        pt.push([a, c, b], [b, c, d2], [a, b, c], [b, d2, c])   // double-sided
+                    }
+                    parts.push(ApplyMaterial({
+                        input: Mesh({ vertices: pv, triangles: pt, normals: pn }),
+                        material: Material({ color: [1, 0.93, 0.6, 0.055], roughness: 0.9 }),
+                    }))
+                    }
+                }
+                if (params.showSunlight) {
+                    // the sunlight envelope: every ray from the Sun's disc that the
+                    // Earth intercepts - a frustum from the Sun's limb down to the
+                    // Earth's limb, tangent at the terminator. Subtracting the globe
+                    // leaves it wrapping the day hemisphere as a faint glowing skin.
+                    const sunPos = at(gp, sunDist)
+                    const L = Math.hypot(sunPos[0], sunPos[1], sunPos[2])
+                    const a2 = sunPos.map(c => c / L)
+                    const rX = Math.acos(a2[1]) * 180 / Math.PI
+                    const rY = Math.atan2(a2[0], a2[2]) * 180 / Math.PI
+                    parts.push(ApplyMaterial({
+                        input: Difference([
+                            Transform({
+                                input: Cylinder({ height: L, radiusLow: R, radiusHigh: sunR, resolution: 64, anchor: [0.5, 0, 0.5] }),
+                                rotate: [rX, rY, 0],
+                            }),
+                            Sphere({ radius: R * 1.003, resolution: 64 }),
+                        ]),
+                        material: Material({ color: [1, 0.95, 0.75, 0.055], roughness: 0.9 }),
+                    }))
+                }
+                return Group(parts)
+            produces: MESHES
+        label:
+            doc: |
+                Flat extruded lettering: a string to 3D glyphs lying in the XZ
+                plane, centered on the origin, face toward +Y. (Text cannot be
+                called inside an expression, so this factory wraps it.)
+            params:
+                text: X
+                size: 0.05
+            render:
+                pipe:
+                  - op: Text
+                    with:
+                        text:
+                            param: text
+                        fontSize:
+                            param: size
+                        alignX: center
+                        alignY: center
+                  - op: Extrude
+                    with:
+                        height: 0.006
+        # ── DIMENSION LINES ── Moon and Sun distances as technical dimension
+        # lines along the shadow axis: bar-ended lines offset sideways from
+        # the cones, labeled with the real distance and the computed
+        # compression factor of this scene.
+        distanceMarkers:
+            expression: |
+                if (!params.showDistances) return []
+                const rad = a => a * Math.PI / 180
+                const ec = assets.eclipse
+                const R = params.earthRadius
+                const p = params.distanceRealism
+                const moonDist = R * 57.12 ** p
+                const sunDist = R * 23782 ** p
+                const dirV = (lat, lon) => {
+                    const q = rad(lat), l = rad(lon)
+                    return [Math.cos(q) * Math.cos(l), Math.sin(q), -Math.cos(q) * Math.sin(l)]
+                }
+                const z = dirV(ec.subLat, ec.subLon)
+                const gp = [...ec.anchor].map(c => c * R)
+                const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+                const norm3 = a => { const l = Math.hypot(a[0], a[1], a[2]); return a.map(c => c / l) }
+                const add = (a, b, s) => [a[0] + b[0] * s, a[1] + b[1] * s, a[2] + b[2] * s]
+                const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+                // label frame: reading along the line, facing the +X side
+                const out = norm3(add([1, 0, 0], z, -dot([1, 0, 0], z)))
+                const right = z.map(c => -c)
+                const up = cross(out, right)
+                const n = norm3(cross(z, [0, 1, 0]))   // sideways offset off the cones
+                // same compression measure as the legend (from Earth's center)
+                const zg = Math.sqrt(1 - ec.gamma * ec.gamma) * R
+                const dist = s => Math.sqrt(R * R + 2 * s * zg + s * s)
+                const nice = v => v < 100 ? Math.round(v) : Math.round(v / 100) * 100
+                const parts = []
+                const lineMat = Material({ color: [0.85, 0.85, 0.9, 1], roughness: 0.5 })
+                const dim = (offset, len, text, size) => {
+                    const a = add(gp, n, offset), b = add(a, z, len)
+                    parts.push(ApplyMaterial({ input: Sweep({ input: Circle({ radius: 0.0022, resolution: 8 }), path: [a, b] }), material: lineMat }))
+                    for (const e of [a, b])
+                        parts.push(ApplyMaterial({ input: Sweep({ input: Circle({ radius: 0.0022, resolution: 8 }), path: [add(e, up, -0.035), add(e, up, 0.035)] }), material: lineMat }))
+                    const m = assets.label({ text, size }).meshes[0]
+                    const v = Dot({ input: m.vertices, other: [right, out, [-up[0], -up[1], -up[2]]] })
+                    const mid = add(add(a, z, len / 2), up, 0.055)
+                    parts.push(ApplyMaterial({ input: Mesh({ vertices: v + Data(mid), triangles: m.triangles }), material: lineMat }))
+                }
+                const fM = nice(57.12 * R / dist(moonDist))
+                const fS = nice(23782 * R / dist(sunDist))
+                dim(0.16, moonDist, `Moon 364,000 km away - here ${fM}x closer`, 0.036)
+                dim(0.32, sunDist, `Sun 151.5M km away - here ${fS}x closer`, 0.055)
+                // body labels: true sizes, and how much smaller they are drawn
+                // (sizes derive from the shadow cone at the compressed distances)
+                const aOff = ec.l2u / ec.tanF2 * R
+                const moonR = (aOff + moonDist) * ec.tanF2
+                const sunR = (aOff + sunDist) * ec.tanF2
+                const bodyLabel = (pos, text, size) => {
+                    const m = assets.label({ text, size }).meshes[0]
+                    const v = Dot({ input: m.vertices, other: [right, out, [-up[0], -up[1], -up[2]]] })
+                    parts.push(ApplyMaterial({ input: Mesh({ vertices: v + Data(pos), triangles: m.triangles }), material: lineMat }))
+                }
+                bodyLabel(add(add(gp, z, moonDist), up, moonR + 0.045), `Moon 3,475 km wide - here ${nice(0.2727 * R / moonR)}x smaller`, 0.026)
+                bodyLabel(add(add(gp, z, sunDist), up, sunR * 2 + 0.05), `Sun 1.39M km wide - here ${nice(109.2 * R / sunR)}x smaller`, 0.05)
+                bodyLabel([0, R + 0.08, 0], `Earth 12,742 km wide`, 0.042)
+                return Group(parts)
+            produces: MESHES
+        titlePlaque:
+            doc: |
+                3D title text below the globe.
+            pipe:
+              - op: Text
+                with:
+                    text:
+                        expression: |
+                            const t = 17 * 60 + 46 + params.time
+                            const pad = v => (v < 10 ? "0" : "") + v
+                            return `Total Solar Eclipse - 12 Aug 2026, ${pad(Math.floor(t / 60))}:${pad(Math.round(t % 60))} UTC`
+                    fontSize: 0.13
+                    alignX: center
+                    alignY: center
+              - op: Extrude
+                with:
+                    height: 0.015
+              - op: Transform
+                with:
+                    rotate: [90, 0, 0]
+                    translate: [0, -0.85, 0]
+              - op: ApplyMaterial
+                with:
+                    material:
+                        op: Material
+                        with:
+                            color: [0.92, 0.92, 0.95, 1]
+                            roughness: 0.4
+    render:
+        group:
+            # the scene is yawed -90 deg so the eclipse geometry's profile
+            # (Earth left, cone running to Moon and Sun) is the FRONT view
+          - op: Transform
+            with:
+                rotate: [0, -90, 0]
+            input:
+                group:
+                  - asset: earth
+                  - asset: pathGeometry
+                  - asset: footprints
+                  - asset: geMarker
+                  - asset: celestial
+                  - asset: distanceMarkers
+          - asset: titlePlaque
+assets/land.csv: |
+    ring,lon,lat
+    0,-59.57,-80.04
+    0,-59.87,-80.55
+    0,-60.16,-81.00
+    0,-62.26,-80.86
+    0,-64.49,-80.92
+    0,-65.74,-80.59
+    0,-65.74,-80.55
+    0,-66.29,-80.26
+    0,-64.04,-80.29
+    0,-61.88,-80.39
+    0,-61.14,-79.98
+    0,-60.61,-79.63
+    0,-59.57,-80.04
+    1,-159.21,-79.50
+    1,-161.13,-79.63
+    1,-162.44,-79.28
+    1,-163.03,-78.93
+    1,-163.07,-78.87
+    1,-163.71,-78.60
+    1,-163.71,-78.60
+    1,-163.11,-78.22
+    1,-161.25,-78.38
+    1,-160.25,-78.69
+    1,-159.48,-79.05
+    1,-159.21,-79.50
+    2,-45.15,-78.05
+    2,-43.92,-78.48
+    2,-43.49,-79.09
+    2,-43.37,-79.52
+    2,-43.33,-80.03
+    2,-44.88,-80.34
+    2,-46.51,-80.59
+    2,-48.39,-80.83
+    2,-50.48,-81.03
+    2,-52.85,-80.97
+    2,-54.16,-80.63
+    2,-53.99,-80.22
+    2,-51.85,-79.95
+    2,-50.99,-79.61
+    2,-50.36,-79.18
+    2,-49.91,-78.81
+    2,-49.31,-78.46
+    2,-48.66,-78.05
+    2,-48.66,-78.05
+    2,-48.15,-78.05
+    2,-46.66,-77.83
+    2,-45.15,-78.05
+    3,-121.21,-73.50
+    3,-119.92,-73.66
+    3,-118.72,-73.48
+    3,-119.29,-73.83
+    3,-120.23,-74.09
+    3,-121.62,-74.01
+    3,-122.62,-73.66
+    3,-122.62,-73.66
+    3,-122.41,-73.32
+    3,-121.21,-73.50
+    4,-125.56,-73.48
+    4,-124.03,-73.87
+    4,-124.62,-73.83
+    4,-125.91,-73.74
+    4,-127.28,-73.46
+    4,-127.28,-73.46
+    4,-126.56,-73.25
+    4,-125.56,-73.48
+    5,-98.98,-71.93
+    5,-97.88,-72.07
+    5,-96.79,-71.95
+    5,-96.20,-72.52
+    5,-96.98,-72.44
+    5,-98.20,-72.48
+    5,-99.43,-72.44
+    5,-100.78,-72.50
+    5,-101.80,-72.31
+    5,-102.33,-71.89
+    5,-102.33,-71.89
+    5,-101.70,-71.72
+    5,-100.43,-71.85
+    5,-98.98,-71.93
+    6,-68.45,-70.96
+    6,-68.33,-71.41
+    6,-68.51,-71.80
+    6,-68.78,-72.17
+    6,-69.96,-72.31
+    6,-71.08,-72.50
+    6,-72.39,-72.48
+    6,-71.90,-72.09
+    6,-73.07,-72.23
+    6,-74.19,-72.37
+    6,-74.95,-72.07
+    6,-75.01,-71.66
+    6,-73.92,-71.27
+    6,-73.92,-71.27
+    6,-73.23,-71.15
+    6,-72.07,-71.19
+    6,-71.78,-70.68
+    6,-71.72,-70.31
+    6,-71.74,-69.51
+    6,-71.17,-69.04
+    6,-70.25,-68.88
+    6,-69.72,-69.25
+    6,-69.49,-69.62
+    6,-69.06,-70.07
+    6,-68.73,-70.51
+    6,-68.45,-70.96
+    7,-58.61,-64.15
+    7,-59.05,-64.37
+    7,-59.79,-64.21
+    7,-60.61,-64.31
+    7,-61.30,-64.54
+    7,-62.02,-64.80
+    7,-62.51,-65.09
+    7,-62.65,-65.48
+    7,-62.59,-65.86
+    7,-62.12,-66.19
+    7,-62.81,-66.43
+    7,-63.75,-66.50
+    7,-64.29,-66.84
+    7,-64.88,-67.15
+    7,-65.51,-67.58
+    7,-65.67,-67.95
+    7,-65.31,-68.37
+    7,-64.78,-68.68
+    7,-63.96,-68.91
+    7,-63.20,-69.23
+    7,-62.79,-69.62
+    7,-62.57,-69.99
+    7,-62.28,-70.38
+    7,-61.81,-70.72
+    7,-61.51,-71.09
+    7,-61.38,-72.01
+    7,-61.08,-72.38
+    7,-61.00,-72.77
+    7,-60.69,-73.17
+    7,-60.83,-73.70
+    7,-61.38,-74.11
+    7,-61.96,-74.44
+    7,-63.30,-74.58
+    7,-63.75,-74.93
+    7,-64.35,-75.26
+    7,-65.86,-75.64
+    7,-67.19,-75.79
+    7,-68.45,-76.01
+    7,-69.80,-76.22
+    7,-70.60,-76.63
+    7,-72.21,-76.67
+    7,-73.97,-76.63
+    7,-75.56,-76.71
+    7,-77.24,-76.71
+    7,-76.93,-77.10
+    7,-75.40,-77.28
+    7,-74.28,-77.56
+    7,-73.66,-77.91
+    7,-74.77,-78.22
+    7,-76.50,-78.12
+    7,-77.93,-78.38
+    7,-77.98,-78.79
+    7,-78.02,-79.18
+    7,-76.85,-79.51
+    7,-76.63,-79.89
+    7,-75.36,-80.26
+    7,-73.24,-80.42
+    7,-71.44,-80.69
+    7,-70.01,-81.00
+    7,-68.19,-81.32
+    7,-65.70,-81.47
+    7,-63.26,-81.75
+    7,-61.55,-82.04
+    7,-59.69,-82.38
+    7,-58.71,-82.85
+    7,-58.22,-83.22
+    7,-57.01,-82.87
+    7,-55.36,-82.57
+    7,-53.62,-82.26
+    7,-51.54,-82.00
+    7,-49.76,-81.73
+    7,-47.27,-81.71
+    7,-44.83,-81.85
+    7,-42.81,-82.08
+    7,-42.16,-81.65
+    7,-40.77,-81.36
+    7,-38.24,-81.34
+    7,-36.27,-81.12
+    7,-34.39,-80.91
+    7,-32.31,-80.77
+    7,-30.10,-80.59
+    7,-28.55,-80.34
+    7,-29.25,-79.99
+    7,-29.69,-79.63
+    7,-29.69,-79.26
+    7,-31.62,-79.30
+    7,-33.68,-79.46
+    7,-35.64,-79.46
+    7,-35.91,-79.08
+    7,-35.78,-78.34
+    7,-35.33,-78.12
+    7,-33.90,-77.89
+    7,-32.21,-77.65
+    7,-31.00,-77.36
+    7,-29.78,-77.07
+    7,-28.88,-76.67
+    7,-27.51,-76.50
+    7,-26.16,-76.36
+    7,-25.47,-76.28
+    7,-23.93,-76.24
+    7,-22.46,-76.11
+    7,-21.22,-75.91
+    7,-20.01,-75.67
+    7,-18.91,-75.44
+    7,-17.52,-75.13
+    7,-16.64,-74.79
+    7,-15.70,-74.50
+    7,-15.41,-74.11
+    7,-16.47,-73.87
+    7,-16.11,-73.46
+    7,-15.45,-73.15
+    7,-14.41,-72.95
+    7,-13.31,-72.72
+    7,-12.29,-72.40
+    7,-11.51,-72.01
+    7,-11.02,-71.54
+    7,-10.30,-71.27
+    7,-9.10,-71.32
+    7,-8.61,-71.66
+    7,-7.42,-71.70
+    7,-7.38,-71.32
+    7,-6.87,-70.93
+    7,-5.79,-71.03
+    7,-5.54,-71.40
+    7,-4.34,-71.46
+    7,-3.05,-71.29
+    7,-1.80,-71.17
+    7,-0.66,-71.23
+    7,-0.23,-71.64
+    7,0.87,-71.30
+    7,1.89,-71.13
+    7,3.02,-70.99
+    7,4.14,-70.85
+    7,5.16,-70.62
+    7,6.27,-70.46
+    7,7.14,-70.25
+    7,7.74,-69.89
+    7,8.49,-70.15
+    7,9.53,-70.01
+    7,10.25,-70.48
+    7,10.82,-70.83
+    7,11.95,-70.64
+    7,12.40,-70.25
+    7,13.42,-69.97
+    7,14.73,-70.03
+    7,15.13,-70.40
+    7,15.95,-70.03
+    7,17.03,-69.91
+    7,18.20,-69.87
+    7,19.26,-69.89
+    7,20.38,-70.01
+    7,21.45,-70.07
+    7,21.92,-70.40
+    7,22.57,-70.70
+    7,23.67,-70.52
+    7,24.84,-70.48
+    7,25.98,-70.48
+    7,27.09,-70.46
+    7,28.09,-70.32
+    7,29.15,-70.21
+    7,30.03,-69.93
+    7,30.97,-69.76
+    7,31.99,-69.66
+    7,32.75,-69.38
+    7,33.30,-68.84
+    7,33.87,-68.50
+    7,34.91,-68.66
+    7,35.30,-69.01
+    7,36.16,-69.25
+    7,37.20,-69.17
+    7,37.91,-69.52
+    7,38.65,-69.78
+    7,39.67,-69.54
+    7,40.02,-69.11
+    7,40.92,-68.93
+    7,41.96,-68.60
+    7,42.94,-68.46
+    7,44.11,-68.27
+    7,44.90,-68.05
+    7,45.72,-67.82
+    7,46.50,-67.60
+    7,47.44,-67.72
+    7,48.34,-67.37
+    7,48.99,-67.09
+    7,49.93,-67.11
+    7,50.75,-66.88
+    7,50.95,-66.52
+    7,51.79,-66.25
+    7,52.61,-66.05
+    7,53.61,-65.90
+    7,54.53,-65.82
+    7,55.41,-65.88
+    7,56.36,-65.97
+    7,57.16,-66.25
+    7,57.26,-66.68
+    7,58.14,-67.01
+    7,58.74,-67.29
+    7,59.94,-67.41
+    7,60.61,-67.68
+    7,61.43,-67.95
+    7,62.39,-68.01
+    7,63.19,-67.82
+    7,64.05,-67.41
+    7,64.99,-67.62
+    7,65.97,-67.74
+    7,66.91,-67.86
+    7,67.89,-67.93
+    7,68.89,-67.93
+    7,69.71,-68.97
+    7,69.67,-69.23
+    7,69.56,-69.68
+    7,68.60,-69.93
+    7,67.81,-70.31
+    7,67.95,-70.70
+    7,69.07,-70.68
+    7,68.93,-71.07
+    7,68.42,-71.44
+    7,67.95,-71.85
+    7,68.71,-72.17
+    7,69.87,-72.26
+    7,71.02,-72.09
+    7,71.57,-71.70
+    7,71.91,-71.32
+    7,72.45,-71.01
+    7,73.08,-70.72
+    7,73.34,-70.36
+    7,73.86,-69.87
+    7,74.49,-69.78
+    7,75.63,-69.74
+    7,76.63,-69.62
+    7,77.64,-69.46
+    7,78.13,-69.07
+    7,78.43,-68.70
+    7,79.11,-68.33
+    7,80.09,-68.07
+    7,80.94,-67.88
+    7,81.48,-67.54
+    7,82.05,-67.37
+    7,82.78,-67.21
+    7,83.78,-67.31
+    7,84.68,-67.21
+    7,85.66,-67.09
+    7,86.75,-67.15
+    7,87.48,-66.88
+    7,87.99,-66.21
+    7,88.36,-66.48
+    7,88.83,-66.95
+    7,89.67,-67.15
+    7,90.63,-67.23
+    7,91.59,-67.11
+    7,92.61,-67.19
+    7,93.55,-67.21
+    7,94.18,-67.11
+    7,95.02,-67.17
+    7,95.78,-67.39
+    7,96.68,-67.25
+    7,97.76,-67.25
+    7,98.68,-67.11
+    7,99.72,-67.25
+    7,100.38,-66.92
+    7,100.89,-66.58
+    7,101.58,-66.31
+    7,102.83,-65.56
+    7,103.48,-65.70
+    7,104.24,-65.97
+    7,104.91,-66.33
+    7,106.18,-66.93
+    7,107.16,-66.95
+    7,108.08,-66.95
+    7,109.16,-66.84
+    7,110.24,-66.70
+    7,111.06,-66.43
+    7,111.74,-66.13
+    7,112.86,-66.09
+    7,113.60,-65.88
+    7,114.39,-66.07
+    7,114.90,-66.39
+    7,115.60,-66.70
+    7,116.70,-66.66
+    7,117.38,-66.92
+    7,118.58,-67.17
+    7,119.83,-67.27
+    7,120.87,-67.19
+    7,121.65,-66.88
+    7,122.32,-66.56
+    7,123.22,-66.48
+    7,124.12,-66.62
+    7,125.16,-66.72
+    7,126.10,-66.56
+    7,127.00,-66.56
+    7,127.88,-66.66
+    7,128.80,-66.76
+    7,129.70,-66.58
+    7,130.78,-66.43
+    7,131.80,-66.39
+    7,132.94,-66.39
+    7,133.86,-66.29
+    7,134.76,-66.21
+    7,135.03,-65.72
+    7,135.07,-65.31
+    7,135.70,-65.58
+    7,135.87,-66.03
+    7,136.21,-66.45
+    7,136.62,-66.78
+    7,137.46,-66.95
+    7,138.60,-66.90
+    7,139.91,-66.88
+    7,140.81,-66.82
+    7,142.12,-66.82
+    7,143.06,-66.80
+    7,144.37,-66.84
+    7,145.49,-66.92
+    7,146.20,-67.23
+    7,146.00,-67.60
+    7,146.65,-67.90
+    7,147.72,-68.13
+    7,148.84,-68.39
+    7,150.13,-68.56
+    7,151.48,-68.72
+    7,152.50,-68.87
+    7,153.64,-68.89
+    7,154.28,-68.56
+    7,155.17,-68.84
+    7,155.93,-69.15
+    7,156.81,-69.38
+    7,158.03,-69.48
+    7,159.18,-69.60
+    7,159.67,-69.99
+    7,160.81,-70.23
+    7,161.57,-70.58
+    7,162.69,-70.74
+    7,163.84,-70.72
+    7,164.92,-70.78
+    7,166.11,-70.76
+    7,167.31,-70.83
+    7,168.43,-70.97
+    7,169.46,-71.21
+    7,170.50,-71.40
+    7,171.21,-71.70
+    7,171.09,-72.09
+    7,170.56,-72.44
+    7,170.11,-72.89
+    7,169.76,-73.24
+    7,169.29,-73.66
+    7,167.98,-73.81
+    7,167.39,-74.17
+    7,166.09,-74.38
+    7,165.64,-74.77
+    7,164.96,-75.15
+    7,164.23,-75.46
+    7,163.82,-75.87
+    7,163.57,-76.24
+    7,163.47,-76.69
+    7,163.49,-77.07
+    7,164.06,-77.46
+    7,164.27,-77.83
+    7,164.74,-78.18
+    7,166.60,-78.32
+    7,167.00,-78.75
+    7,165.19,-78.91
+    7,163.67,-79.12
+    7,161.77,-79.16
+    7,160.92,-79.73
+    7,160.75,-80.20
+    7,160.32,-80.57
+    7,159.79,-80.95
+    7,161.12,-81.28
+    7,161.63,-81.69
+    7,162.49,-82.06
+    7,163.71,-82.40
+    7,165.10,-82.71
+    7,166.60,-83.02
+    7,168.90,-83.34
+    7,169.40,-83.83
+    7,172.28,-84.04
+    7,172.48,-84.12
+    7,173.22,-84.41
+    7,175.99,-84.16
+    7,178.28,-84.47
+    7,180.00,-84.71
+    7,180.00,-90.00
+    7,-180.00,-90.00
+    7,-180.00,-84.71
+    7,-179.94,-84.72
+    7,-179.06,-84.14
+    7,-177.26,-84.45
+    7,-177.14,-84.42
+    7,-176.86,-84.33
+    7,-176.52,-84.23
+    7,-176.23,-84.14
+    7,-176.08,-84.10
+    7,-175.93,-84.10
+    7,-175.83,-84.12
+    7,-174.38,-84.53
+    7,-173.12,-84.12
+    7,-172.89,-84.06
+    7,-169.95,-83.88
+    7,-169.00,-84.12
+    7,-168.53,-84.24
+    7,-167.02,-84.57
+    7,-164.18,-84.83
+    7,-161.93,-85.14
+    7,-158.07,-85.37
+    7,-155.19,-85.10
+    7,-150.94,-85.30
+    7,-148.53,-85.61
+    7,-145.89,-85.32
+    7,-143.11,-85.04
+    7,-142.89,-84.57
+    7,-146.83,-84.53
+    7,-150.06,-84.30
+    7,-150.90,-83.90
+    7,-153.59,-83.69
+    7,-153.41,-83.24
+    7,-153.04,-82.83
+    7,-152.67,-82.45
+    7,-152.86,-82.04
+    7,-154.53,-81.77
+    7,-155.29,-81.42
+    7,-156.84,-81.10
+    7,-154.41,-81.16
+    7,-152.10,-81.00
+    7,-150.65,-81.34
+    7,-148.87,-81.04
+    7,-147.22,-80.67
+    7,-146.42,-80.34
+    7,-146.77,-79.93
+    7,-148.06,-79.65
+    7,-149.53,-79.36
+    7,-151.59,-79.30
+    7,-153.39,-79.16
+    7,-155.33,-79.06
+    7,-155.98,-78.69
+    7,-157.27,-78.38
+    7,-158.05,-78.03
+    7,-158.37,-76.89
+    7,-157.88,-76.99
+    7,-156.97,-77.30
+    7,-155.33,-77.20
+    7,-153.74,-77.07
+    7,-152.92,-77.50
+    7,-151.33,-77.40
+    7,-150.00,-77.18
+    7,-148.75,-76.91
+    7,-147.61,-76.58
+    7,-146.10,-76.48
+    7,-146.14,-76.11
+    7,-146.50,-75.73
+    7,-146.20,-75.38
+    7,-144.91,-75.20
+    7,-144.32,-75.54
+    7,-142.79,-75.34
+    7,-141.64,-75.09
+    7,-140.21,-75.07
+    7,-138.86,-74.97
+    7,-137.51,-74.73
+    7,-136.43,-74.52
+    7,-135.21,-74.30
+    7,-134.43,-74.36
+    7,-133.75,-74.44
+    7,-132.26,-74.30
+    7,-130.93,-74.48
+    7,-129.55,-74.46
+    7,-128.24,-74.32
+    7,-126.89,-74.42
+    7,-125.40,-74.52
+    7,-124.01,-74.48
+    7,-122.56,-74.50
+    7,-121.07,-74.52
+    7,-119.70,-74.48
+    7,-118.68,-74.19
+    7,-117.47,-74.03
+    7,-116.22,-74.24
+    7,-115.02,-74.07
+    7,-113.94,-73.71
+    7,-113.30,-74.03
+    7,-112.95,-74.38
+    7,-112.30,-74.71
+    7,-111.26,-74.42
+    7,-110.07,-74.79
+    7,-108.71,-74.91
+    7,-107.56,-75.18
+    7,-106.15,-75.13
+    7,-104.88,-74.95
+    7,-103.37,-74.99
+    7,-102.02,-75.13
+    7,-100.65,-75.30
+    7,-100.12,-74.87
+    7,-100.76,-74.54
+    7,-101.25,-74.19
+    7,-102.55,-74.11
+    7,-103.11,-73.73
+    7,-103.33,-73.36
+    7,-103.68,-72.62
+    7,-102.92,-72.75
+    7,-101.61,-72.81
+    7,-100.31,-72.75
+    7,-99.14,-72.91
+    7,-98.12,-73.21
+    7,-97.69,-73.56
+    7,-96.34,-73.62
+    7,-95.04,-73.48
+    7,-93.67,-73.28
+    7,-92.44,-73.17
+    7,-91.42,-73.40
+    7,-90.09,-73.32
+    7,-89.23,-72.56
+    7,-88.42,-73.01
+    7,-87.27,-73.19
+    7,-86.01,-73.09
+    7,-85.19,-73.48
+    7,-83.88,-73.52
+    7,-82.67,-73.64
+    7,-81.47,-73.85
+    7,-80.69,-73.48
+    7,-80.30,-73.13
+    7,-79.30,-73.52
+    7,-77.93,-73.42
+    7,-76.91,-73.64
+    7,-76.22,-73.97
+    7,-74.89,-73.87
+    7,-73.85,-73.66
+    7,-72.83,-73.40
+    7,-71.62,-73.26
+    7,-70.21,-73.15
+    7,-68.94,-73.01
+    7,-67.96,-72.79
+    7,-67.37,-72.48
+    7,-67.13,-72.05
+    7,-67.25,-71.64
+    7,-67.56,-71.25
+    7,-67.92,-70.85
+    7,-68.23,-70.46
+    7,-68.49,-70.11
+    7,-68.54,-69.72
+    7,-68.45,-69.33
+    7,-67.98,-68.95
+    7,-67.58,-68.54
+    7,-67.43,-68.15
+    7,-67.62,-67.72
+    7,-67.74,-67.33
+    7,-67.25,-66.88
+    7,-66.70,-66.58
+    7,-66.06,-66.21
+    7,-65.37,-65.90
+    7,-64.57,-65.60
+    7,-64.18,-65.17
+    7,-63.63,-64.90
+    7,-63.00,-64.64
+    7,-62.04,-64.58
+    7,-61.41,-64.27
+    7,-60.71,-64.07
+    7,-59.89,-63.96
+    7,-59.16,-63.70
+    7,-58.59,-63.39
+    7,-57.81,-63.27
+    7,-57.22,-63.53
+    7,-57.60,-63.86
+    7,-58.61,-64.15
+    8,-67.75,-53.85
+    8,-66.45,-54.45
+    8,-65.05,-54.70
+    8,-65.50,-55.20
+    8,-66.45,-55.25
+    8,-66.96,-54.90
+    8,-67.29,-55.30
+    8,-68.15,-55.61
+    8,-69.23,-55.50
+    8,-69.96,-55.20
+    8,-71.01,-55.05
+    8,-72.26,-54.50
+    8,-73.29,-53.96
+    8,-74.66,-52.84
+    8,-73.84,-53.05
+    8,-72.43,-53.72
+    8,-71.11,-54.07
+    8,-70.59,-53.62
+    8,-70.27,-52.93
+    8,-69.35,-52.52
+    8,-68.63,-52.64
+    8,-68.63,-52.64
+    8,-68.25,-53.10
+    8,-67.75,-53.85
+    9,-58.55,-51.10
+    9,-57.75,-51.55
+    9,-58.05,-51.90
+    9,-59.40,-52.20
+    9,-59.85,-51.85
+    9,-60.70,-52.30
+    9,-61.20,-51.85
+    9,-60.00,-51.25
+    9,-59.15,-51.50
+    9,-58.55,-51.10
+    10,70.28,-49.71
+    10,68.75,-49.77
+    10,68.72,-49.24
+    10,68.87,-48.83
+    10,68.94,-48.62
+    10,69.58,-48.94
+    10,70.53,-49.06
+    10,70.56,-49.26
+    10,70.28,-49.71
+    11,145.40,-40.79
+    11,146.36,-41.14
+    11,146.91,-41.00
+    11,147.69,-40.81
+    11,148.29,-40.88
+    11,148.36,-42.06
+    11,148.02,-42.41
+    11,147.91,-43.21
+    11,147.56,-42.94
+    11,146.87,-43.63
+    11,146.66,-43.58
+    11,146.05,-43.55
+    11,145.43,-42.69
+    11,145.30,-42.03
+    11,144.72,-41.16
+    11,144.74,-40.70
+    11,145.40,-40.79
+    12,173.02,-40.92
+    12,173.25,-41.33
+    12,173.96,-40.93
+    12,174.25,-41.35
+    12,174.25,-41.77
+    12,173.88,-42.23
+    12,173.22,-42.97
+    12,172.71,-43.37
+    12,173.08,-43.85
+    12,172.31,-43.87
+    12,171.45,-44.24
+    12,171.19,-44.90
+    12,170.62,-45.91
+    12,169.83,-46.36
+    12,169.33,-46.64
+    12,168.41,-46.62
+    12,167.76,-46.29
+    12,166.68,-46.22
+    12,166.51,-45.85
+    12,167.05,-45.11
+    12,168.30,-44.12
+    12,168.95,-43.94
+    12,169.67,-43.56
+    12,170.52,-43.03
+    12,171.13,-42.51
+    12,171.57,-41.77
+    12,171.95,-41.51
+    12,172.10,-40.96
+    12,172.80,-40.49
+    12,173.02,-40.92
+    13,174.61,-36.16
+    13,175.34,-37.21
+    13,175.36,-36.53
+    13,175.81,-36.80
+    13,175.96,-37.56
+    13,176.76,-37.88
+    13,177.44,-37.96
+    13,178.01,-37.58
+    13,178.52,-37.70
+    13,178.27,-38.58
+    13,177.97,-39.17
+    13,177.21,-39.15
+    13,176.94,-39.45
+    13,177.03,-39.88
+    13,176.89,-40.07
+    13,176.51,-40.60
+    13,176.01,-41.29
+    13,175.24,-41.69
+    13,175.07,-41.43
+    13,174.65,-41.28
+    13,175.23,-40.46
+    13,174.90,-39.91
+    13,173.82,-39.51
+    13,173.85,-39.15
+    13,174.57,-38.80
+    13,174.74,-38.03
+    13,174.70,-37.38
+    13,174.29,-36.71
+    13,174.32,-36.53
+    13,173.84,-36.12
+    13,173.05,-35.24
+    13,172.64,-34.53
+    13,173.01,-34.45
+    13,173.55,-35.01
+    13,174.33,-35.27
+    13,174.61,-36.16
+    14,167.12,-22.16
+    14,166.74,-22.40
+    14,166.19,-22.13
+    14,165.47,-21.68
+    14,164.83,-21.15
+    14,164.17,-20.44
+    14,164.03,-20.11
+    14,164.46,-20.12
+    14,165.02,-20.46
+    14,165.46,-20.80
+    14,165.78,-21.08
+    14,166.60,-21.70
+    14,167.12,-22.16
+    15,178.37,-17.34
+    15,178.72,-17.63
+    15,178.55,-18.15
+    15,177.93,-18.29
+    15,177.38,-18.16
+    15,177.29,-17.72
+    15,177.67,-17.38
+    15,178.13,-17.50
+    15,178.37,-17.34
+    16,179.36,-16.80
+    16,178.73,-17.01
+    16,178.60,-16.64
+    16,179.10,-16.43
+    16,179.41,-16.38
+    16,180.00,-16.07
+    16,180.00,-16.56
+    16,179.36,-16.80
+    17,-179.92,-16.50
+    17,-180.00,-16.56
+    17,-180.00,-16.07
+    17,-179.79,-16.02
+    17,-179.92,-16.50
+    18,167.84,-16.47
+    18,167.52,-16.60
+    18,167.18,-16.16
+    18,167.22,-15.89
+    18,167.84,-16.47
+    19,167.11,-14.93
+    19,167.27,-15.74
+    19,167.00,-15.61
+    19,166.79,-15.67
+    19,166.65,-15.39
+    19,166.63,-14.63
+    19,167.11,-14.93
+    20,50.06,-13.56
+    20,50.22,-14.76
+    20,50.48,-15.23
+    20,50.38,-15.71
+    20,50.20,-16.00
+    20,49.86,-15.41
+    20,49.67,-15.71
+    20,49.86,-16.45
+    20,49.77,-16.88
+    20,49.50,-17.11
+    20,49.44,-17.95
+    20,49.04,-19.12
+    20,48.55,-20.50
+    20,47.93,-22.39
+    20,47.55,-23.78
+    20,47.10,-24.94
+    20,46.28,-25.18
+    20,45.41,-25.60
+    20,44.83,-25.35
+    20,44.04,-24.99
+    20,43.76,-24.46
+    20,43.70,-23.57
+    20,43.35,-22.78
+    20,43.25,-22.06
+    20,43.43,-21.34
+    20,43.89,-21.16
+    20,43.90,-20.83
+    20,44.37,-20.07
+    20,44.46,-19.44
+    20,44.23,-18.96
+    20,44.04,-18.33
+    20,43.96,-17.41
+    20,44.31,-16.85
+    20,44.45,-16.22
+    20,44.94,-16.18
+    20,45.50,-15.97
+    20,45.87,-15.79
+    20,46.31,-15.78
+    20,46.88,-15.21
+    20,47.71,-14.59
+    20,48.01,-14.09
+    20,47.87,-13.66
+    20,48.29,-13.78
+    20,48.85,-13.09
+    20,48.86,-12.49
+    20,49.19,-12.04
+    20,49.54,-12.47
+    20,49.81,-12.90
+    20,50.06,-13.56
+    21,143.56,-13.76
+    21,143.92,-14.55
+    21,144.56,-14.17
+    21,144.89,-14.59
+    21,145.37,-14.98
+    21,145.27,-15.43
+    21,145.49,-16.29
+    21,145.64,-16.78
+    21,145.89,-16.91
+    21,146.16,-17.76
+    21,146.06,-18.28
+    21,146.39,-18.96
+    21,147.47,-19.48
+    21,148.18,-19.96
+    21,148.85,-20.39
+    21,148.72,-20.63
+    21,149.29,-21.26
+    21,149.68,-22.34
+    21,150.08,-22.12
+    21,150.48,-22.56
+    21,150.73,-22.40
+    21,150.90,-23.46
+    21,151.61,-24.08
+    21,152.07,-24.46
+    21,152.86,-25.27
+    21,153.14,-26.07
+    21,153.16,-26.64
+    21,153.09,-27.26
+    21,153.57,-28.11
+    21,153.51,-29.00
+    21,153.34,-29.46
+    21,153.07,-30.35
+    21,153.09,-30.92
+    21,152.89,-31.64
+    21,152.45,-32.55
+    21,151.71,-33.04
+    21,151.34,-33.82
+    21,151.01,-34.31
+    21,150.71,-35.17
+    21,150.33,-35.67
+    21,150.08,-36.42
+    21,149.95,-37.11
+    21,150.00,-37.43
+    21,149.42,-37.77
+    21,148.30,-37.81
+    21,147.38,-38.22
+    21,146.92,-38.61
+    21,146.32,-39.04
+    21,145.49,-38.59
+    21,144.88,-38.42
+    21,145.03,-37.90
+    21,144.49,-38.09
+    21,143.61,-38.81
+    21,142.75,-38.54
+    21,142.18,-38.38
+    21,141.61,-38.31
+    21,140.64,-38.02
+    21,139.99,-37.40
+    21,139.81,-36.64
+    21,139.57,-36.14
+    21,139.08,-35.73
+    21,138.12,-35.61
+    21,138.45,-35.13
+    21,138.21,-34.38
+    21,137.72,-35.08
+    21,136.83,-35.26
+    21,137.35,-34.71
+    21,137.50,-34.13
+    21,137.89,-33.64
+    21,137.81,-32.90
+    21,137.00,-33.75
+    21,136.37,-34.09
+    21,135.99,-34.89
+    21,135.21,-34.48
+    21,135.24,-33.95
+    21,134.61,-33.22
+    21,134.09,-32.85
+    21,134.27,-32.62
+    21,132.99,-32.01
+    21,132.29,-31.98
+    21,131.33,-31.50
+    21,129.54,-31.59
+    21,128.24,-31.95
+    21,127.10,-32.28
+    21,126.15,-32.22
+    21,125.09,-32.73
+    21,124.22,-32.96
+    21,124.03,-33.48
+    21,123.66,-33.89
+    21,122.81,-33.91
+    21,122.18,-34.00
+    21,121.30,-33.82
+    21,120.58,-33.93
+    21,119.89,-33.98
+    21,119.30,-34.51
+    21,119.01,-34.46
+    21,118.51,-34.75
+    21,118.02,-35.06
+    21,117.30,-35.03
+    21,116.63,-35.03
+    21,115.56,-34.39
+    21,115.03,-34.20
+    21,115.05,-33.62
+    21,115.55,-33.49
+    21,115.71,-33.26
+    21,115.68,-32.90
+    21,115.80,-32.21
+    21,115.69,-31.61
+    21,115.16,-30.60
+    21,115.00,-30.03
+    21,115.04,-29.46
+    21,114.64,-28.81
+    21,114.62,-28.52
+    21,114.17,-28.12
+    21,114.05,-27.33
+    21,113.48,-26.54
+    21,113.34,-26.12
+    21,113.78,-26.55
+    21,113.44,-25.62
+    21,113.94,-25.91
+    21,114.23,-26.30
+    21,114.22,-25.79
+    21,113.72,-25.00
+    21,113.63,-24.68
+    21,113.39,-24.38
+    21,113.50,-23.81
+    21,113.71,-23.56
+    21,113.84,-23.06
+    21,113.74,-22.48
+    21,114.15,-21.76
+    21,114.23,-22.52
+    21,114.65,-21.83
+    21,115.46,-21.50
+    21,115.95,-21.07
+    21,116.71,-20.70
+    21,117.17,-20.62
+    21,117.44,-20.75
+    21,118.23,-20.37
+    21,118.84,-20.26
+    21,118.99,-20.04
+    21,119.25,-19.95
+    21,119.81,-19.98
+    21,120.86,-19.68
+    21,121.40,-19.24
+    21,121.66,-18.71
+    21,122.24,-18.20
+    21,122.29,-17.80
+    21,122.31,-17.25
+    21,123.01,-16.41
+    21,123.43,-17.27
+    21,123.86,-17.07
+    21,123.50,-16.60
+    21,123.82,-16.11
+    21,124.26,-16.33
+    21,124.38,-15.57
+    21,124.93,-15.08
+    21,125.17,-14.68
+    21,125.67,-14.51
+    21,125.69,-14.23
+    21,126.13,-14.35
+    21,126.14,-14.10
+    21,126.58,-13.95
+    21,127.07,-13.82
+    21,127.80,-14.28
+    21,128.36,-14.87
+    21,128.99,-14.88
+    21,129.62,-14.97
+    21,129.41,-14.42
+    21,129.89,-13.62
+    21,130.34,-13.36
+    21,130.18,-13.11
+    21,130.62,-12.54
+    21,131.22,-12.18
+    21,131.74,-12.30
+    21,132.58,-12.11
+    21,132.56,-11.60
+    21,131.82,-11.27
+    21,132.36,-11.13
+    21,133.02,-11.38
+    21,133.55,-11.79
+    21,134.39,-12.04
+    21,134.68,-11.94
+    21,135.30,-12.25
+    21,135.88,-11.96
+    21,136.26,-12.05
+    21,136.49,-11.86
+    21,136.95,-12.35
+    21,136.69,-12.89
+    21,136.31,-13.29
+    21,135.96,-13.32
+    21,136.08,-13.72
+    21,135.78,-14.22
+    21,135.43,-14.72
+    21,135.50,-15.00
+    21,136.30,-15.55
+    21,137.07,-15.87
+    21,137.58,-16.22
+    21,138.30,-16.81
+    21,138.59,-16.81
+    21,139.11,-17.06
+    21,139.26,-17.37
+    21,140.22,-17.71
+    21,140.88,-17.37
+    21,141.07,-16.83
+    21,141.27,-16.39
+    21,141.40,-15.84
+    21,141.70,-15.04
+    21,141.56,-14.56
+    21,141.64,-14.27
+    21,141.52,-13.70
+    21,141.65,-12.94
+    21,141.84,-12.74
+    21,141.69,-12.41
+    21,141.93,-11.88
+    21,142.12,-11.33
+    21,142.14,-11.04
+    21,142.52,-10.67
+    21,142.80,-11.16
+    21,142.87,-11.78
+    21,143.12,-11.91
+    21,143.16,-12.33
+    21,143.52,-12.83
+    21,143.60,-13.40
+    21,143.56,-13.76
+    22,162.12,-10.48
+    22,162.40,-10.83
+    22,161.70,-10.82
+    22,161.32,-10.20
+    22,161.92,-10.45
+    22,162.12,-10.48
+    23,120.72,-10.24
+    23,120.30,-10.26
+    23,118.97,-9.56
+    23,119.90,-9.36
+    23,120.43,-9.67
+    23,120.78,-9.97
+    23,120.72,-10.24
+    24,160.85,-9.87
+    24,160.46,-9.90
+    24,159.85,-9.79
+    24,159.64,-9.64
+    24,159.70,-9.24
+    24,160.36,-9.40
+    24,160.69,-9.61
+    24,160.85,-9.87
+    25,161.68,-9.60
+    25,161.53,-9.78
+    25,160.79,-8.92
+    25,160.58,-8.32
+    25,160.92,-8.32
+    25,161.28,-9.12
+    25,161.68,-9.60
+    26,124.44,-10.14
+    26,123.58,-10.36
+    26,123.46,-10.24
+    26,123.55,-9.90
+    26,123.98,-9.29
+    26,124.97,-8.89
+    26,125.09,-8.66
+    26,125.95,-8.43
+    26,126.64,-8.40
+    26,126.96,-8.27
+    26,127.34,-8.40
+    26,126.97,-8.67
+    26,125.93,-9.11
+    26,125.09,-9.39
+    26,124.44,-10.14
+    27,117.90,-8.10
+    27,118.26,-8.36
+    27,118.88,-8.28
+    27,119.13,-8.71
+    27,117.97,-8.91
+    27,117.28,-9.04
+    27,116.74,-9.03
+    27,117.08,-8.46
+    27,117.63,-8.45
+    27,117.90,-8.10
+    28,122.90,-8.09
+    28,122.76,-8.65
+    28,121.25,-8.93
+    28,119.92,-8.81
+    28,119.92,-8.44
+    28,120.72,-8.24
+    28,121.34,-8.54
+    28,122.01,-8.46
+    28,122.90,-8.09
+    29,159.88,-8.34
+    29,159.92,-8.54
+    29,159.13,-8.11
+    29,158.59,-7.75
+    29,158.21,-7.42
+    29,158.36,-7.32
+    29,158.82,-7.56
+    29,159.64,-8.02
+    29,159.88,-8.34
+    30,157.54,-7.35
+    30,157.34,-7.40
+    30,156.90,-7.18
+    30,156.49,-6.77
+    30,156.54,-6.60
+    30,157.14,-7.02
+    30,157.54,-7.35
+    31,108.62,-6.78
+    31,110.54,-6.88
+    31,110.76,-6.47
+    31,112.61,-6.95
+    31,112.98,-7.59
+    31,114.48,-7.78
+    31,115.71,-8.37
+    31,114.56,-8.75
+    31,113.46,-8.35
+    31,112.56,-8.38
+    31,111.52,-8.30
+    31,110.59,-8.12
+    31,109.43,-7.74
+    31,108.69,-7.64
+    31,108.28,-7.77
+    31,106.45,-7.35
+    31,106.28,-6.92
+    31,105.37,-6.85
+    31,106.05,-5.90
+    31,107.27,-5.95
+    31,108.07,-6.35
+    31,108.49,-6.42
+    31,108.62,-6.78
+    32,134.72,-6.21
+    32,134.21,-6.90
+    32,134.11,-6.14
+    32,134.29,-5.78
+    32,134.50,-5.45
+    32,134.73,-5.74
+    32,134.72,-6.21
+    33,155.88,-6.82
+    33,155.60,-6.92
+    33,155.17,-6.54
+    33,154.73,-5.90
+    33,154.51,-5.14
+    33,154.65,-5.04
+    33,154.76,-5.34
+    33,155.06,-5.57
+    33,155.55,-6.20
+    33,156.02,-6.54
+    33,155.88,-6.82
+    34,151.98,-5.48
+    34,151.46,-5.56
+    34,151.30,-5.84
+    34,150.75,-6.08
+    34,150.24,-6.32
+    34,149.71,-6.32
+    34,148.89,-6.03
+    34,148.32,-5.75
+    34,148.40,-5.44
+    34,149.30,-5.58
+    34,149.85,-5.51
+    34,150.00,-5.03
+    34,150.14,-5.00
+    34,150.24,-5.53
+    34,150.81,-5.46
+    34,151.09,-5.11
+    34,151.65,-4.76
+    34,151.54,-4.17
+    34,152.14,-4.15
+    34,152.34,-4.31
+    34,152.32,-4.87
+    34,151.98,-5.48
+    35,127.25,-3.46
+    35,126.87,-3.79
+    35,126.18,-3.61
+    35,125.99,-3.18
+    35,127.00,-3.13
+    35,127.25,-3.46
+    36,130.47,-3.09
+    36,130.83,-3.86
+    36,129.99,-3.45
+    36,129.16,-3.36
+    36,128.59,-3.43
+    36,127.90,-3.39
+    36,128.14,-2.84
+    36,129.37,-2.80
+    36,130.47,-3.09
+    37,153.14,-4.50
+    37,152.83,-4.77
+    37,152.64,-4.18
+    37,152.41,-3.79
+    37,151.95,-3.46
+    37,151.38,-3.04
+    37,150.66,-2.74
+    37,150.94,-2.50
+    37,151.48,-2.78
+    37,151.82,-3.00
+    37,152.24,-3.24
+    37,152.64,-3.66
+    37,153.02,-3.98
+    37,153.14,-4.50
+    38,134.14,-1.15
+    38,134.42,-2.77
+    38,135.46,-3.37
+    38,136.29,-2.31
+    38,137.44,-1.70
+    38,138.33,-1.70
+    38,139.18,-2.05
+    38,139.93,-2.41
+    38,141.00,-2.60
+    38,142.74,-3.29
+    38,144.58,-3.86
+    38,145.27,-4.37
+    38,145.83,-4.88
+    38,145.98,-5.47
+    38,147.65,-6.08
+    38,147.89,-6.61
+    38,146.97,-6.72
+    38,147.19,-7.39
+    38,148.08,-8.04
+    38,148.73,-9.10
+    38,149.31,-9.07
+    38,149.27,-9.51
+    38,150.04,-9.68
+    38,149.74,-9.87
+    38,150.80,-10.29
+    38,150.69,-10.58
+    38,150.03,-10.65
+    38,149.78,-10.39
+    38,148.92,-10.28
+    38,147.91,-10.13
+    38,147.14,-9.49
+    38,146.57,-8.94
+    38,146.05,-8.07
+    38,144.74,-7.63
+    38,143.90,-7.92
+    38,143.29,-8.25
+    38,143.41,-8.98
+    38,142.63,-9.33
+    38,142.07,-9.16
+    38,141.03,-9.12
+    38,140.14,-8.30
+    38,139.13,-8.10
+    38,138.88,-8.38
+    38,137.61,-8.41
+    38,138.04,-7.60
+    38,138.67,-7.32
+    38,138.41,-6.23
+    38,137.93,-5.39
+    38,135.99,-4.55
+    38,135.16,-4.46
+    38,133.66,-3.54
+    38,133.37,-4.02
+    38,132.98,-4.11
+    38,132.76,-3.75
+    38,132.75,-3.31
+    38,131.99,-2.82
+    38,133.07,-2.46
+    38,133.78,-2.48
+    38,133.70,-2.21
+    38,132.23,-2.21
+    38,131.84,-1.62
+    38,130.94,-1.43
+    38,130.52,-0.94
+    38,131.87,-0.70
+    38,132.38,-0.37
+    38,133.99,-0.78
+    38,134.14,-1.15
+    39,125.24,1.42
+    39,124.44,0.43
+    39,123.69,0.24
+    39,122.72,0.43
+    39,121.06,0.38
+    39,120.18,0.24
+    39,120.04,-0.52
+    39,120.94,-1.41
+    39,121.48,-0.96
+    39,123.34,-0.62
+    39,123.26,-1.08
+    39,122.82,-0.93
+    39,122.39,-1.52
+    39,121.51,-1.90
+    39,122.45,-3.19
+    39,122.27,-3.53
+    39,123.17,-4.68
+    39,123.16,-5.34
+    39,122.63,-5.63
+    39,122.24,-5.28
+    39,122.72,-4.46
+    39,121.74,-4.85
+    39,121.49,-4.57
+    39,121.62,-4.19
+    39,120.90,-3.60
+    39,120.97,-2.63
+    39,120.31,-2.93
+    39,120.39,-4.10
+    39,120.43,-5.53
+    39,119.80,-5.67
+    39,119.37,-5.38
+    39,119.65,-4.46
+    39,119.50,-3.49
+    39,119.08,-3.49
+    39,118.77,-2.80
+    39,119.18,-2.15
+    39,119.32,-1.35
+    39,119.83,0.15
+    39,120.04,0.57
+    39,120.89,1.31
+    39,121.67,1.01
+    39,122.93,0.88
+    39,124.08,0.92
+    39,125.07,1.64
+    39,125.24,1.42
+    40,128.69,1.13
+    40,128.64,0.26
+    40,128.12,0.36
+    40,127.97,-0.25
+    40,128.38,-0.78
+    40,128.10,-0.90
+    40,127.70,-0.27
+    40,127.40,1.01
+    40,127.60,1.81
+    40,127.93,2.17
+    40,128.00,1.63
+    40,128.59,1.54
+    40,128.69,1.13
+    41,105.82,-5.85
+    41,104.71,-5.87
+    41,103.87,-5.04
+    41,102.58,-4.22
+    41,102.16,-3.61
+    41,101.40,-2.80
+    41,100.90,-2.05
+    41,100.14,-0.65
+    41,99.26,0.18
+    41,98.97,1.04
+    41,98.60,1.82
+    41,97.70,2.45
+    41,97.18,3.31
+    41,96.42,3.87
+    41,95.38,4.97
+    41,95.29,5.48
+    41,95.94,5.44
+    41,97.48,5.25
+    41,98.37,4.27
+    41,99.14,3.59
+    41,99.69,3.17
+    41,100.64,2.10
+    41,101.66,2.08
+    41,102.50,1.40
+    41,103.08,0.56
+    41,103.84,0.10
+    41,103.44,-0.71
+    41,104.01,-1.06
+    41,104.37,-1.08
+    41,104.54,-1.78
+    41,104.89,-2.34
+    41,105.62,-2.43
+    41,106.11,-3.06
+    41,105.86,-4.31
+    41,105.82,-5.85
+    42,117.88,1.83
+    42,119.00,0.90
+    42,117.81,0.78
+    42,117.48,0.10
+    42,117.52,-0.80
+    42,116.56,-1.49
+    42,116.53,-2.48
+    42,116.15,-4.01
+    42,116.00,-3.66
+    42,114.86,-4.11
+    42,114.47,-3.50
+    42,113.76,-3.44
+    42,113.26,-3.12
+    42,112.07,-3.48
+    42,111.70,-2.99
+    42,111.05,-3.05
+    42,110.22,-2.93
+    42,110.07,-1.59
+    42,109.57,-1.31
+    42,109.09,-0.46
+    42,108.95,0.42
+    42,109.07,1.34
+    42,109.66,2.01
+    42,110.40,1.66
+    42,111.17,1.85
+    42,111.37,2.70
+    42,111.80,2.89
+    42,113.00,3.10
+    42,113.71,3.89
+    42,114.20,4.53
+    42,114.60,4.90
+    42,115.45,5.45
+    42,116.22,6.14
+    42,116.73,6.92
+    42,117.13,6.93
+    42,117.64,6.42
+    42,117.69,5.99
+    42,118.35,5.71
+    42,119.18,5.41
+    42,119.11,5.02
+    42,118.44,4.97
+    42,118.62,4.48
+    42,117.88,4.14
+    42,117.31,3.23
+    42,118.05,2.29
+    42,117.88,1.83
+    43,126.38,8.41
+    43,126.48,7.75
+    43,126.54,7.19
+    43,126.20,6.27
+    43,125.83,7.29
+    43,125.36,6.79
+    43,125.68,6.05
+    43,125.40,5.58
+    43,124.22,6.16
+    43,123.94,6.89
+    43,124.24,7.36
+    43,123.61,7.83
+    43,123.30,7.42
+    43,122.83,7.46
+    43,122.09,6.90
+    43,121.92,7.19
+    43,122.31,8.03
+    43,122.94,8.32
+    43,123.49,8.69
+    43,123.84,8.24
+    43,124.60,8.51
+    43,124.76,8.96
+    43,125.47,8.99
+    43,125.41,9.76
+    43,126.22,9.29
+    43,126.31,8.78
+    43,126.38,8.41
+    44,81.22,6.20
+    44,80.35,5.97
+    44,79.87,6.76
+    44,79.70,8.20
+    44,80.15,9.82
+    44,80.84,9.27
+    44,81.30,8.56
+    44,81.79,7.52
+    44,81.64,6.48
+    44,81.22,6.20
+    45,-60.94,10.11
+    45,-61.77,10.00
+    45,-61.95,10.09
+    45,-61.66,10.37
+    45,-61.68,10.76
+    45,-61.10,10.89
+    45,-60.90,10.86
+    45,-60.94,10.11
+    46,123.98,10.28
+    46,123.62,9.95
+    46,123.31,9.32
+    46,123.00,9.02
+    46,122.38,9.71
+    46,122.59,9.98
+    46,122.84,10.26
+    46,122.95,10.88
+    46,123.50,10.94
+    46,123.34,10.27
+    46,124.08,11.23
+    46,123.98,10.28
+    47,118.50,9.32
+    47,117.17,8.37
+    47,117.66,9.07
+    47,118.39,9.68
+    47,118.99,10.38
+    47,119.51,11.37
+    47,119.69,10.55
+    47,119.03,10.00
+    47,118.50,9.32
+    48,121.88,11.89
+    48,122.48,11.58
+    48,123.12,11.58
+    48,123.10,11.17
+    48,122.64,10.74
+    48,122.00,10.44
+    48,121.97,10.91
+    48,122.04,11.42
+    48,121.88,11.89
+    49,125.50,12.16
+    49,125.78,11.05
+    49,125.01,11.31
+    49,125.03,10.98
+    49,125.28,10.36
+    49,124.80,10.13
+    49,124.76,10.84
+    49,124.46,10.89
+    49,124.30,11.50
+    49,124.89,11.42
+    49,124.88,11.79
+    49,124.27,12.56
+    49,125.23,12.54
+    49,125.50,12.16
+    50,121.53,13.07
+    50,121.26,12.21
+    50,120.83,12.70
+    50,120.32,13.47
+    50,121.18,13.43
+    50,121.53,13.07
+    51,121.32,18.50
+    51,121.94,18.22
+    51,122.25,18.48
+    51,122.34,18.22
+    51,122.17,17.81
+    51,122.52,17.09
+    51,122.25,16.26
+    51,121.66,15.93
+    51,121.51,15.12
+    51,121.73,14.33
+    51,122.26,14.22
+    51,122.70,14.34
+    51,123.95,13.78
+    51,123.86,13.24
+    51,124.18,13.00
+    51,124.08,12.54
+    51,123.30,13.03
+    51,122.93,13.55
+    51,122.67,13.19
+    51,122.03,13.78
+    51,121.13,13.64
+    51,120.63,13.86
+    51,120.68,14.27
+    51,120.99,14.53
+    51,120.69,14.76
+    51,120.56,14.40
+    51,120.07,14.97
+    51,119.92,15.41
+    51,119.88,16.36
+    51,120.29,16.03
+    51,120.39,17.60
+    51,120.72,18.51
+    51,121.32,18.50
+    52,-65.59,18.23
+    52,-65.85,17.98
+    52,-66.60,17.98
+    52,-67.18,17.95
+    52,-67.24,18.37
+    52,-67.10,18.52
+    52,-66.28,18.51
+    52,-65.77,18.43
+    52,-65.59,18.23
+    53,-76.90,17.87
+    53,-77.21,17.70
+    53,-77.77,17.86
+    53,-78.34,18.23
+    53,-78.22,18.45
+    53,-77.80,18.52
+    53,-77.57,18.49
+    53,-76.90,18.40
+    53,-76.37,18.16
+    53,-76.20,17.89
+    53,-76.90,17.87
+    54,-72.58,19.87
+    54,-71.71,19.71
+    54,-71.59,19.88
+    54,-70.81,19.88
+    54,-70.21,19.62
+    54,-69.95,19.65
+    54,-69.77,19.29
+    54,-69.22,19.31
+    54,-69.25,19.02
+    54,-68.81,18.98
+    54,-68.32,18.61
+    54,-68.69,18.21
+    54,-69.16,18.42
+    54,-69.62,18.38
+    54,-69.95,18.43
+    54,-70.13,18.25
+    54,-70.52,18.18
+    54,-70.67,18.43
+    54,-71.00,18.28
+    54,-71.40,17.60
+    54,-71.66,17.76
+    54,-71.71,18.04
+    54,-72.37,18.21
+    54,-72.84,18.15
+    54,-73.45,18.22
+    54,-73.92,18.03
+    54,-74.46,18.34
+    54,-74.37,18.66
+    54,-73.45,18.53
+    54,-72.69,18.45
+    54,-72.33,18.67
+    54,-72.79,19.10
+    54,-72.78,19.48
+    54,-73.42,19.64
+    54,-73.19,19.92
+    54,-72.58,19.87
+    55,110.34,18.68
+    55,109.48,18.20
+    55,108.66,18.51
+    55,108.63,19.37
+    55,109.12,19.82
+    55,110.21,20.10
+    55,110.79,20.08
+    55,111.01,19.70
+    55,110.57,19.26
+    55,110.34,18.68
+    56,-155.54,19.08
+    56,-155.69,18.92
+    56,-155.94,19.06
+    56,-155.91,19.34
+    56,-156.07,19.70
+    56,-156.02,19.81
+    56,-155.85,19.98
+    56,-155.92,20.17
+    56,-155.86,20.27
+    56,-155.79,20.25
+    56,-155.40,20.08
+    56,-155.22,19.99
+    56,-155.06,19.86
+    56,-154.81,19.51
+    56,-154.83,19.45
+    56,-155.22,19.24
+    56,-155.54,19.08
+    57,-156.08,20.64
+    57,-156.41,20.57
+    57,-156.59,20.78
+    57,-156.70,20.86
+    57,-156.71,20.93
+    57,-156.61,21.01
+    57,-156.26,20.92
+    57,-156.00,20.76
+    57,-156.08,20.64
+    58,-156.76,21.18
+    58,-156.79,21.07
+    58,-157.33,21.10
+    58,-157.25,21.22
+    58,-156.76,21.18
+    59,-157.65,21.32
+    59,-157.71,21.26
+    59,-157.78,21.28
+    59,-158.13,21.31
+    59,-158.25,21.54
+    59,-158.29,21.58
+    59,-158.03,21.72
+    59,-157.94,21.65
+    59,-157.65,21.32
+    60,-159.35,21.98
+    60,-159.46,21.88
+    60,-159.80,22.07
+    60,-159.75,22.14
+    60,-159.60,22.24
+    60,-159.37,22.21
+    60,-159.35,21.98
+    61,-79.68,22.77
+    61,-79.28,22.40
+    61,-78.35,22.51
+    61,-77.99,22.28
+    61,-77.15,21.66
+    61,-76.52,21.21
+    61,-76.19,21.22
+    61,-75.60,21.02
+    61,-75.67,20.74
+    61,-74.93,20.69
+    61,-74.18,20.28
+    61,-74.30,20.05
+    61,-74.96,19.92
+    61,-75.63,19.87
+    61,-76.32,19.95
+    61,-77.76,19.86
+    61,-77.09,20.41
+    61,-77.49,20.67
+    61,-78.14,20.74
+    61,-78.48,21.03
+    61,-78.72,21.60
+    61,-79.28,21.56
+    61,-80.22,21.83
+    61,-80.52,22.04
+    61,-81.82,22.19
+    61,-82.17,22.39
+    61,-81.80,22.64
+    61,-82.78,22.69
+    61,-83.49,22.17
+    61,-83.91,22.15
+    61,-84.05,21.91
+    61,-84.55,21.80
+    61,-84.97,21.90
+    61,-84.45,22.20
+    61,-84.23,22.57
+    61,-83.78,22.79
+    61,-83.27,22.98
+    61,-82.51,23.08
+    61,-82.27,23.19
+    61,-81.40,23.12
+    61,-80.62,23.11
+    61,-79.68,22.77
+    62,-77.53,23.76
+    62,-77.78,23.71
+    62,-78.03,24.29
+    62,-78.41,24.58
+    62,-78.19,25.21
+    62,-77.89,25.17
+    62,-77.54,24.34
+    62,-77.53,23.76
+    63,121.18,22.79
+    63,120.75,21.97
+    63,120.22,22.81
+    63,120.11,23.56
+    63,120.69,24.54
+    63,121.50,25.30
+    63,121.95,25.00
+    63,121.78,24.39
+    63,121.18,22.79
+    64,-77.82,26.58
+    64,-78.91,26.42
+    64,-78.98,26.79
+    64,-78.51,26.87
+    64,-77.85,26.84
+    64,-77.82,26.58
+    65,-77.00,26.59
+    65,-77.17,25.88
+    65,-77.36,26.01
+    65,-77.34,26.53
+    65,-77.79,26.93
+    65,-77.79,27.04
+    65,-77.00,26.59
+    66,134.64,34.15
+    66,134.77,33.81
+    66,134.20,33.20
+    66,133.79,33.52
+    66,133.28,33.29
+    66,133.01,32.70
+    66,132.36,32.99
+    66,132.37,33.46
+    66,132.92,34.06
+    66,133.49,33.94
+    66,133.90,34.36
+    66,134.64,34.15
+    67,34.58,35.67
+    67,33.90,35.25
+    67,33.97,35.06
+    67,34.00,34.98
+    67,32.98,34.57
+    67,32.49,34.70
+    67,32.26,35.10
+    67,32.73,35.14
+    67,32.80,35.15
+    67,32.95,35.39
+    67,33.67,35.37
+    67,34.58,35.67
+    68,23.70,35.71
+    68,24.25,35.37
+    68,25.03,35.42
+    68,25.77,35.35
+    68,25.75,35.18
+    68,26.29,35.30
+    68,26.16,35.00
+    68,24.72,34.92
+    68,24.74,35.08
+    68,23.51,35.28
+    68,23.70,35.71
+    69,15.52,38.23
+    69,15.16,37.44
+    69,15.31,37.13
+    69,15.10,36.62
+    69,14.34,37.00
+    69,13.83,37.10
+    69,12.43,37.61
+    69,12.57,38.13
+    69,13.74,38.03
+    69,14.76,38.14
+    69,15.52,38.23
+    70,9.21,41.21
+    70,9.81,40.50
+    70,9.67,39.18
+    70,9.21,39.24
+    70,8.81,38.91
+    70,8.43,39.17
+    70,8.39,40.38
+    70,8.16,40.95
+    70,8.71,40.90
+    70,9.21,41.21
+    71,140.98,37.14
+    71,140.60,36.34
+    71,140.77,35.84
+    71,140.25,35.14
+    71,138.98,34.67
+    71,137.22,34.61
+    71,135.79,33.46
+    71,135.12,33.85
+    71,135.08,34.60
+    71,133.34,34.38
+    71,132.16,33.90
+    71,130.99,33.89
+    71,132.00,33.15
+    71,131.33,31.45
+    71,130.69,31.03
+    71,130.20,31.42
+    71,130.45,32.32
+    71,129.81,32.61
+    71,129.41,33.30
+    71,130.35,33.60
+    71,130.88,34.23
+    71,131.88,34.75
+    71,132.62,35.43
+    71,134.61,35.73
+    71,135.68,35.53
+    71,136.72,37.30
+    71,137.39,36.83
+    71,138.86,37.83
+    71,139.43,38.22
+    71,140.05,39.44
+    71,139.88,40.56
+    71,140.31,41.20
+    71,141.37,41.38
+    71,141.91,39.99
+    71,141.88,39.18
+    71,140.96,38.17
+    71,140.98,37.14
+    72,9.56,42.15
+    72,9.23,41.38
+    72,8.78,41.58
+    72,8.54,42.26
+    72,8.75,42.63
+    72,9.39,43.01
+    72,9.56,42.15
+    73,143.91,44.17
+    73,144.61,43.96
+    73,145.32,44.38
+    73,145.54,43.26
+    73,144.06,42.99
+    73,143.18,42.00
+    73,141.61,42.68
+    73,141.07,41.58
+    73,139.96,41.57
+    73,139.82,42.56
+    73,140.31,43.33
+    73,141.38,43.39
+    73,141.67,44.77
+    73,141.97,45.55
+    73,143.14,44.51
+    73,143.91,44.17
+    74,-63.66,46.55
+    74,-62.94,46.42
+    74,-62.01,46.44
+    74,-62.50,46.03
+    74,-62.87,45.97
+    74,-64.14,46.39
+    74,-64.39,46.73
+    74,-64.01,47.04
+    74,-63.66,46.55
+    75,-61.81,49.11
+    75,-62.29,49.09
+    75,-63.59,49.40
+    75,-64.52,49.87
+    75,-64.17,49.96
+    75,-62.86,49.71
+    75,-61.84,49.29
+    75,-61.81,49.11
+    76,-123.51,48.51
+    76,-124.01,48.37
+    76,-125.66,48.83
+    76,-125.95,49.18
+    76,-126.85,49.53
+    76,-127.03,49.81
+    76,-128.06,49.99
+    76,-128.44,50.54
+    76,-128.36,50.77
+    76,-127.31,50.55
+    76,-126.70,50.40
+    76,-125.76,50.30
+    76,-125.42,49.95
+    76,-124.92,49.48
+    76,-123.92,49.06
+    76,-123.51,48.51
+    77,-56.13,50.69
+    77,-56.80,49.81
+    77,-56.14,50.15
+    77,-55.47,49.94
+    77,-55.82,49.59
+    77,-54.94,49.31
+    77,-54.47,49.56
+    77,-53.48,49.25
+    77,-53.79,48.52
+    77,-53.09,48.69
+    77,-52.96,48.16
+    77,-52.65,47.54
+    77,-53.07,46.66
+    77,-53.52,46.62
+    77,-54.18,46.81
+    77,-53.96,47.63
+    77,-54.24,47.75
+    77,-55.40,46.88
+    77,-56.00,46.92
+    77,-55.29,47.39
+    77,-56.25,47.63
+    77,-57.33,47.57
+    77,-59.27,47.60
+    77,-59.42,47.90
+    77,-58.80,48.25
+    77,-59.23,48.52
+    77,-58.39,49.13
+    77,-57.36,50.72
+    77,-56.74,51.29
+    77,-55.87,51.63
+    77,-55.41,51.59
+    77,-55.60,51.32
+    77,-56.13,50.69
+    78,-132.71,54.04
+    78,-132.71,54.04
+    78,-132.71,54.04
+    78,-132.71,54.04
+    78,-131.75,54.12
+    78,-132.05,52.98
+    78,-131.18,52.18
+    78,-131.58,52.18
+    78,-132.18,52.64
+    78,-132.55,53.10
+    78,-133.05,53.41
+    78,-133.24,53.85
+    78,-133.18,54.17
+    78,-132.71,54.04
+    79,143.65,50.75
+    79,144.65,48.98
+    79,143.17,49.31
+    79,142.56,47.86
+    79,143.53,46.84
+    79,143.51,46.14
+    79,142.75,46.74
+    79,142.09,45.97
+    79,141.91,46.81
+    79,142.02,47.78
+    79,141.90,48.86
+    79,142.14,49.62
+    79,142.18,50.95
+    79,141.59,51.94
+    79,141.68,53.30
+    79,142.61,53.76
+    79,142.21,54.23
+    79,142.65,54.37
+    79,142.91,53.70
+    79,143.26,52.74
+    79,143.24,51.76
+    79,143.65,50.75
+    80,-6.79,52.26
+    80,-8.56,51.67
+    80,-9.98,51.82
+    80,-9.17,52.86
+    80,-9.69,53.88
+    80,-8.33,54.66
+    80,-7.57,55.13
+    80,-6.73,55.17
+    80,-5.66,54.55
+    80,-6.20,53.87
+    80,-6.03,53.15
+    80,-6.79,52.26
+    81,12.69,55.61
+    81,12.09,54.80
+    81,11.04,55.36
+    81,10.90,55.78
+    81,12.37,56.11
+    81,12.69,55.61
+    82,-153.01,57.12
+    82,-154.01,56.73
+    82,-154.52,56.99
+    82,-154.67,57.46
+    82,-153.76,57.82
+    82,-153.23,57.97
+    82,-152.56,57.90
+    82,-152.14,57.59
+    82,-153.01,57.12
+    83,-3.01,58.63
+    83,-4.07,57.55
+    83,-3.06,57.69
+    83,-1.96,57.68
+    83,-2.22,56.87
+    83,-3.12,55.97
+    83,-2.09,55.91
+    83,-1.11,54.62
+    83,-0.43,54.46
+    83,0.18,53.33
+    83,0.47,52.93
+    83,1.68,52.74
+    83,1.56,52.10
+    83,1.05,51.81
+    83,1.45,51.29
+    83,0.55,50.77
+    83,-0.79,50.77
+    83,-2.49,50.50
+    83,-2.96,50.70
+    83,-3.62,50.23
+    83,-4.54,50.34
+    83,-5.25,49.96
+    83,-5.78,50.16
+    83,-4.31,51.21
+    83,-3.41,51.43
+    83,-4.98,51.59
+    83,-5.27,51.99
+    83,-4.22,52.30
+    83,-4.77,52.84
+    83,-4.58,53.50
+    83,-3.09,53.40
+    83,-2.95,53.98
+    83,-3.63,54.62
+    83,-4.84,54.79
+    83,-5.08,55.06
+    83,-4.72,55.51
+    83,-5.05,55.78
+    83,-5.59,55.31
+    83,-5.64,56.28
+    83,-6.15,56.79
+    83,-5.79,57.82
+    83,-5.01,58.63
+    83,-4.21,58.55
+    83,-3.01,58.63
+    84,-165.58,59.91
+    84,-166.19,59.75
+    84,-166.85,59.94
+    84,-167.46,60.21
+    84,-166.47,60.38
+    84,-165.67,60.29
+    84,-165.58,59.91
+    85,-79.27,62.16
+    85,-79.66,61.63
+    85,-80.10,61.72
+    85,-80.36,62.02
+    85,-80.32,62.09
+    85,-79.93,62.39
+    85,-79.52,62.36
+    85,-79.27,62.16
+    86,-81.90,62.71
+    86,-83.07,62.16
+    86,-83.77,62.18
+    86,-83.99,62.45
+    86,-83.25,62.91
+    86,-81.88,62.90
+    86,-81.90,62.71
+    87,-171.73,63.78
+    87,-171.11,63.59
+    87,-170.49,63.69
+    87,-169.68,63.43
+    87,-168.69,63.30
+    87,-168.77,63.19
+    87,-169.53,62.98
+    87,-170.29,63.19
+    87,-170.67,63.38
+    87,-171.55,63.32
+    87,-171.79,63.41
+    87,-171.73,63.78
+    88,-85.16,65.66
+    88,-84.98,65.22
+    88,-84.46,65.37
+    88,-83.88,65.11
+    88,-82.79,64.77
+    88,-81.64,64.46
+    88,-81.55,63.98
+    88,-80.82,64.06
+    88,-80.10,63.73
+    88,-80.99,63.41
+    88,-82.55,63.65
+    88,-83.11,64.10
+    88,-84.10,63.57
+    88,-85.52,63.05
+    88,-85.87,63.64
+    88,-87.22,63.54
+    88,-86.35,64.04
+    88,-86.22,64.82
+    88,-85.88,65.74
+    88,-85.16,65.66
+    89,-14.51,66.46
+    89,-14.74,65.81
+    89,-13.61,65.13
+    89,-14.91,64.36
+    89,-17.79,63.68
+    89,-18.66,63.50
+    89,-19.97,63.64
+    89,-22.76,63.96
+    89,-21.78,64.40
+    89,-23.96,64.89
+    89,-22.18,65.08
+    89,-22.23,65.38
+    89,-24.33,65.61
+    89,-23.65,66.26
+    89,-22.13,66.41
+    89,-20.58,65.73
+    89,-19.06,66.28
+    89,-17.80,65.99
+    89,-16.17,66.53
+    89,-14.51,66.46
+    90,-75.87,67.15
+    90,-76.99,67.10
+    90,-77.24,67.59
+    90,-76.81,68.15
+    90,-75.90,68.29
+    90,-75.11,68.01
+    90,-75.10,67.58
+    90,-75.22,67.44
+    90,-75.87,67.15
+    91,-175.01,66.58
+    91,-174.34,66.34
+    91,-174.57,67.06
+    91,-171.86,66.91
+    91,-169.90,65.98
+    91,-170.89,65.54
+    91,-172.53,65.44
+    91,-172.56,64.46
+    91,-172.96,64.25
+    91,-173.89,64.28
+    91,-174.65,64.63
+    91,-175.98,64.92
+    91,-176.21,65.36
+    91,-177.22,65.52
+    91,-178.36,65.39
+    91,-178.90,65.74
+    91,-178.69,66.11
+    91,-179.88,65.87
+    91,-179.43,65.40
+    91,-180.00,64.98
+    91,-180.00,68.96
+    91,-177.55,68.20
+    91,-174.93,67.21
+    91,-175.01,66.58
+    92,-95.65,69.11
+    92,-96.27,68.76
+    92,-97.62,69.06
+    92,-98.43,68.95
+    92,-99.80,69.40
+    92,-98.92,69.71
+    92,-98.22,70.14
+    92,-97.16,69.86
+    92,-96.56,69.68
+    92,-96.26,69.49
+    92,-95.65,69.11
+    93,180.00,70.83
+    93,178.90,70.78
+    93,178.73,71.10
+    93,180.00,71.52
+    93,180.00,70.83
+    94,-178.69,70.89
+    94,-180.00,70.83
+    94,-180.00,71.52
+    94,-179.87,71.56
+    94,-179.02,71.56
+    94,-177.58,71.27
+    94,-177.66,71.13
+    94,-178.69,70.89
+    95,-90.55,69.50
+    95,-90.55,68.48
+    95,-89.22,69.26
+    95,-88.02,68.62
+    95,-88.32,67.87
+    95,-87.35,67.20
+    95,-86.31,67.92
+    95,-85.58,68.78
+    95,-85.52,69.88
+    95,-84.10,69.81
+    95,-82.62,69.66
+    95,-81.28,69.16
+    95,-81.22,68.67
+    95,-81.96,68.13
+    95,-81.26,67.60
+    95,-81.39,67.11
+    95,-83.34,66.41
+    95,-84.74,66.26
+    95,-85.77,66.56
+    95,-86.07,66.06
+    95,-87.03,65.21
+    95,-87.32,64.78
+    95,-88.48,64.10
+    95,-89.91,64.03
+    95,-90.70,63.61
+    95,-90.77,62.96
+    95,-91.93,62.84
+    95,-93.16,62.02
+    95,-94.24,60.90
+    95,-94.63,60.11
+    95,-94.68,58.95
+    95,-93.22,58.78
+    95,-92.76,57.85
+    95,-92.30,57.09
+    95,-90.90,57.28
+    95,-89.04,56.85
+    95,-88.04,56.47
+    95,-87.32,56.00
+    95,-86.07,55.72
+    95,-85.01,55.30
+    95,-83.36,55.24
+    95,-82.27,55.15
+    95,-82.44,54.28
+    95,-82.12,53.28
+    95,-81.40,52.16
+    95,-79.91,51.21
+    95,-79.14,51.53
+    95,-78.60,52.56
+    95,-79.12,54.14
+    95,-79.83,54.67
+    95,-78.23,55.14
+    95,-77.10,55.84
+    95,-76.54,56.53
+    95,-76.62,57.20
+    95,-77.30,58.05
+    95,-78.52,58.80
+    95,-77.34,59.85
+    95,-77.77,60.76
+    95,-78.11,62.32
+    95,-77.41,62.55
+    95,-75.70,62.28
+    95,-74.67,62.18
+    95,-73.84,62.44
+    95,-72.91,62.11
+    95,-71.68,61.53
+    95,-71.37,61.14
+    95,-69.59,61.06
+    95,-69.62,60.22
+    95,-69.29,58.96
+    95,-68.37,58.80
+    95,-67.65,58.21
+    95,-66.20,58.77
+    95,-65.25,59.87
+    95,-64.58,60.34
+    95,-63.80,59.44
+    95,-62.50,58.17
+    95,-61.40,56.97
+    95,-61.80,56.34
+    95,-60.47,55.78
+    95,-59.57,55.20
+    95,-57.98,54.95
+    95,-57.33,54.63
+    95,-56.94,53.78
+    95,-56.16,53.65
+    95,-55.76,53.27
+    95,-55.68,52.15
+    95,-56.41,51.77
+    95,-57.13,51.42
+    95,-58.77,51.06
+    95,-60.03,50.24
+    95,-61.72,50.08
+    95,-63.86,50.29
+    95,-65.36,50.30
+    95,-66.40,50.23
+    95,-67.24,49.51
+    95,-68.51,49.07
+    95,-69.95,47.74
+    95,-71.10,46.82
+    95,-70.26,46.99
+    95,-68.65,48.30
+    95,-66.55,49.13
+    95,-65.06,49.23
+    95,-64.17,48.74
+    95,-65.12,48.07
+    95,-64.80,46.99
+    95,-64.47,46.24
+    95,-63.17,45.74
+    95,-61.52,45.88
+    95,-60.52,47.01
+    95,-60.45,46.28
+    95,-59.80,45.92
+    95,-61.04,45.27
+    95,-63.25,44.67
+    95,-64.25,44.27
+    95,-65.36,43.55
+    95,-66.12,43.62
+    95,-66.16,44.47
+    95,-64.43,45.29
+    95,-66.03,45.26
+    95,-67.14,45.14
+    95,-66.96,44.81
+    95,-68.03,44.33
+    95,-69.06,43.98
+    95,-70.12,43.68
+    95,-70.69,43.03
+    95,-70.81,42.87
+    95,-70.83,42.34
+    95,-70.49,41.81
+    95,-70.08,41.78
+    95,-70.18,42.15
+    95,-69.88,41.92
+    95,-69.97,41.64
+    95,-70.64,41.48
+    95,-71.12,41.49
+    95,-71.86,41.32
+    95,-72.29,41.27
+    95,-72.88,41.22
+    95,-73.71,40.93
+    95,-72.24,41.12
+    95,-71.95,40.93
+    95,-73.34,40.63
+    95,-73.98,40.63
+    95,-73.95,40.75
+    95,-74.26,40.47
+    95,-73.96,40.43
+    95,-74.18,39.71
+    95,-74.91,38.94
+    95,-74.98,39.20
+    95,-75.20,39.25
+    95,-75.53,39.50
+    95,-75.32,38.96
+    95,-75.08,38.78
+    95,-75.06,38.40
+    95,-75.38,38.02
+    95,-75.94,37.22
+    95,-76.03,37.26
+    95,-75.72,37.94
+    95,-76.23,38.32
+    95,-76.35,39.15
+    95,-76.54,38.72
+    95,-76.33,38.08
+    95,-76.96,38.23
+    95,-76.30,37.92
+    95,-76.26,36.97
+    95,-75.97,36.90
+    95,-75.87,36.55
+    95,-75.73,35.55
+    95,-76.36,34.81
+    95,-77.40,34.51
+    95,-78.05,33.93
+    95,-78.55,33.86
+    95,-79.06,33.49
+    95,-79.20,33.16
+    95,-80.30,32.51
+    95,-80.86,32.03
+    95,-81.34,31.44
+    95,-81.49,30.73
+    95,-81.31,30.04
+    95,-80.98,29.18
+    95,-80.54,28.47
+    95,-80.53,28.04
+    95,-80.06,26.88
+    95,-80.09,26.21
+    95,-80.13,25.82
+    95,-80.38,25.21
+    95,-80.68,25.08
+    95,-81.17,25.20
+    95,-81.33,25.64
+    95,-81.71,25.87
+    95,-82.24,26.73
+    95,-82.71,27.50
+    95,-82.86,27.89
+    95,-82.65,28.55
+    95,-82.93,29.10
+    95,-83.71,29.94
+    95,-84.10,30.09
+    95,-85.11,29.64
+    95,-85.29,29.69
+    95,-85.77,30.15
+    95,-86.40,30.40
+    95,-87.53,30.27
+    95,-88.42,30.38
+    95,-89.18,30.32
+    95,-89.60,30.18
+    95,-89.41,29.89
+    95,-89.43,29.49
+    95,-89.22,29.29
+    95,-89.41,29.16
+    95,-89.78,29.31
+    95,-90.15,29.12
+    95,-90.88,29.15
+    95,-91.63,29.68
+    95,-92.50,29.55
+    95,-93.23,29.78
+    95,-93.85,29.71
+    95,-94.69,29.48
+    95,-95.60,28.74
+    95,-96.59,28.31
+    95,-97.14,27.83
+    95,-97.37,27.38
+    95,-97.38,26.69
+    95,-97.33,26.21
+    95,-97.14,25.87
+    95,-97.14,25.87
+    95,-97.14,25.87
+    95,-97.53,24.99
+    95,-97.70,24.27
+    95,-97.78,22.93
+    95,-97.87,22.44
+    95,-97.70,21.90
+    95,-97.39,21.41
+    95,-97.19,20.64
+    95,-96.53,19.89
+    95,-96.29,19.32
+    95,-95.90,18.83
+    95,-94.84,18.56
+    95,-94.43,18.14
+    95,-93.55,18.42
+    95,-92.79,18.52
+    95,-92.04,18.70
+    95,-91.41,18.88
+    95,-90.77,19.28
+    95,-90.53,19.87
+    95,-90.45,20.71
+    95,-90.28,21.00
+    95,-89.60,21.26
+    95,-88.54,21.49
+    95,-87.66,21.46
+    95,-87.05,21.54
+    95,-86.81,21.33
+    95,-86.85,20.85
+    95,-87.38,20.26
+    95,-87.62,19.65
+    95,-87.44,19.47
+    95,-87.59,19.04
+    95,-87.84,18.26
+    95,-88.09,18.52
+    95,-88.30,18.50
+    95,-88.30,18.35
+    95,-88.11,18.35
+    95,-88.12,18.08
+    95,-88.29,17.64
+    95,-88.20,17.49
+    95,-88.30,17.13
+    95,-88.24,17.04
+    95,-88.36,16.53
+    95,-88.55,16.27
+    95,-88.73,16.23
+    95,-88.93,15.89
+    95,-88.60,15.71
+    95,-88.52,15.86
+    95,-88.22,15.73
+    95,-88.12,15.69
+    95,-87.90,15.86
+    95,-87.62,15.88
+    95,-87.52,15.80
+    95,-87.37,15.85
+    95,-86.90,15.76
+    95,-86.44,15.78
+    95,-86.12,15.89
+    95,-86.00,16.01
+    95,-85.68,15.95
+    95,-85.44,15.89
+    95,-85.18,15.91
+    95,-84.98,16.00
+    95,-84.53,15.86
+    95,-84.37,15.84
+    95,-84.06,15.65
+    95,-83.77,15.42
+    95,-83.41,15.27
+    95,-83.15,15.00
+    95,-83.23,14.90
+    95,-83.28,14.68
+    95,-83.18,14.31
+    95,-83.41,13.97
+    95,-83.52,13.57
+    95,-83.55,13.13
+    95,-83.50,12.87
+    95,-83.47,12.42
+    95,-83.63,12.32
+    95,-83.72,11.89
+    95,-83.65,11.63
+    95,-83.86,11.37
+    95,-83.81,11.10
+    95,-83.66,10.94
+    95,-83.40,10.40
+    95,-83.02,9.99
+    95,-82.55,9.57
+    95,-82.19,9.21
+    95,-82.21,9.00
+    95,-81.81,8.95
+    95,-81.71,9.03
+    95,-81.44,8.79
+    95,-80.95,8.86
+    95,-80.52,9.11
+    95,-79.91,9.31
+    95,-79.57,9.61
+    95,-79.02,9.55
+    95,-79.06,9.45
+    95,-78.50,9.42
+    95,-78.06,9.25
+    95,-77.73,8.95
+    95,-77.35,8.67
+    95,-76.84,8.64
+    95,-76.09,9.34
+    95,-75.67,9.44
+    95,-75.66,9.77
+    95,-75.48,10.62
+    95,-74.91,11.08
+    95,-74.28,11.10
+    95,-74.20,11.31
+    95,-73.41,11.23
+    95,-72.63,11.73
+    95,-72.24,11.96
+    95,-71.75,12.44
+    95,-71.40,12.38
+    95,-71.14,12.11
+    95,-71.33,11.78
+    95,-71.36,11.54
+    95,-71.95,11.42
+    95,-71.62,10.97
+    95,-71.63,10.45
+    95,-72.07,9.87
+    95,-71.70,9.07
+    95,-71.26,9.14
+    95,-71.04,9.86
+    95,-71.35,10.21
+    95,-71.40,10.97
+    95,-70.16,11.38
+    95,-70.29,11.85
+    95,-69.94,12.16
+    95,-69.58,11.46
+    95,-68.88,11.44
+    95,-68.23,10.89
+    95,-68.19,10.55
+    95,-67.30,10.55
+    95,-66.23,10.65
+    95,-65.66,10.20
+    95,-64.89,10.08
+    95,-64.33,10.39
+    95,-64.32,10.64
+    95,-63.08,10.70
+    95,-61.88,10.72
+    95,-62.73,10.42
+    95,-62.39,9.95
+    95,-61.59,9.87
+    95,-60.83,9.38
+    95,-60.67,8.58
+    95,-60.15,8.60
+    95,-59.76,8.37
+    95,-59.10,8.00
+    95,-58.48,7.35
+    95,-58.45,6.83
+    95,-58.08,6.81
+    95,-57.54,6.32
+    95,-57.15,5.97
+    95,-55.95,5.77
+    95,-55.84,5.95
+    95,-55.03,6.03
+    95,-53.96,5.76
+    95,-53.62,5.65
+    95,-52.88,5.41
+    95,-51.82,4.57
+    95,-51.66,4.16
+    95,-51.32,4.20
+    95,-51.07,3.65
+    95,-50.51,1.90
+    95,-49.97,1.74
+    95,-49.95,1.05
+    95,-50.70,0.22
+    95,-50.39,-0.08
+    95,-48.62,-0.24
+    95,-48.58,-1.24
+    95,-47.82,-0.58
+    95,-46.57,-0.94
+    95,-44.91,-1.55
+    95,-44.42,-2.14
+    95,-44.58,-2.69
+    95,-43.42,-2.38
+    95,-41.47,-2.91
+    95,-39.98,-2.87
+    95,-38.50,-3.70
+    95,-37.22,-4.82
+    95,-36.45,-5.11
+    95,-35.60,-5.15
+    95,-35.24,-5.46
+    95,-34.90,-6.74
+    95,-34.73,-7.34
+    95,-35.13,-9.00
+    95,-35.64,-9.65
+    95,-37.05,-11.04
+    95,-37.68,-12.17
+    95,-38.42,-13.04
+    95,-38.67,-13.06
+    95,-38.95,-13.79
+    95,-38.88,-15.67
+    95,-39.16,-17.21
+    95,-39.27,-17.87
+    95,-39.58,-18.26
+    95,-39.76,-19.60
+    95,-40.77,-20.90
+    95,-40.94,-21.94
+    95,-41.75,-22.37
+    95,-41.99,-22.97
+    95,-43.07,-22.97
+    95,-44.65,-23.35
+    95,-45.35,-23.80
+    95,-46.47,-24.09
+    95,-47.65,-24.89
+    95,-48.50,-25.88
+    95,-48.64,-26.62
+    95,-48.47,-27.18
+    95,-48.66,-28.19
+    95,-48.89,-28.67
+    95,-49.59,-29.22
+    95,-50.70,-30.98
+    95,-51.58,-31.78
+    95,-52.26,-32.25
+    95,-52.71,-33.20
+    95,-53.37,-33.77
+    95,-53.81,-34.40
+    95,-54.94,-34.95
+    95,-55.67,-34.75
+    95,-56.22,-34.86
+    95,-57.14,-34.43
+    95,-57.82,-34.46
+    95,-58.43,-33.91
+    95,-58.50,-34.43
+    95,-57.23,-35.29
+    95,-57.36,-35.98
+    95,-56.74,-36.41
+    95,-56.79,-36.90
+    95,-57.75,-38.18
+    95,-59.23,-38.72
+    95,-61.24,-38.93
+    95,-62.34,-38.83
+    95,-62.13,-39.42
+    95,-62.33,-40.17
+    95,-62.15,-40.68
+    95,-62.75,-41.03
+    95,-63.77,-41.17
+    95,-64.73,-40.80
+    95,-65.12,-41.06
+    95,-64.98,-42.06
+    95,-64.30,-42.36
+    95,-63.76,-42.04
+    95,-63.46,-42.56
+    95,-64.38,-42.87
+    95,-65.18,-43.50
+    95,-65.33,-44.50
+    95,-65.57,-45.04
+    95,-66.51,-45.04
+    95,-67.29,-45.55
+    95,-67.58,-46.30
+    95,-66.60,-47.03
+    95,-65.64,-47.24
+    95,-65.99,-48.13
+    95,-67.17,-48.70
+    95,-67.82,-49.87
+    95,-68.73,-50.26
+    95,-69.14,-50.73
+    95,-68.82,-51.77
+    95,-68.15,-52.35
+    95,-68.57,-52.30
+    95,-69.46,-52.29
+    95,-69.94,-52.54
+    95,-70.85,-52.90
+    95,-71.01,-53.83
+    95,-71.43,-53.86
+    95,-72.56,-53.53
+    95,-73.70,-52.84
+    95,-74.95,-52.26
+    95,-75.26,-51.63
+    95,-74.98,-51.04
+    95,-75.48,-50.38
+    95,-75.61,-48.67
+    95,-75.18,-47.71
+    95,-74.13,-46.94
+    95,-75.64,-46.65
+    95,-74.69,-45.76
+    95,-74.35,-44.10
+    95,-73.24,-44.45
+    95,-72.72,-42.38
+    95,-73.39,-42.12
+    95,-73.70,-43.37
+    95,-74.33,-43.22
+    95,-74.02,-41.79
+    95,-73.68,-39.94
+    95,-73.22,-39.26
+    95,-73.51,-38.28
+    95,-73.59,-37.16
+    95,-73.17,-37.12
+    95,-72.55,-35.51
+    95,-71.86,-33.91
+    95,-71.44,-32.42
+    95,-71.67,-30.92
+    95,-71.37,-30.10
+    95,-71.49,-28.86
+    95,-70.91,-27.64
+    95,-70.72,-25.71
+    95,-70.40,-23.63
+    95,-70.09,-21.39
+    95,-70.16,-19.76
+    95,-70.37,-18.35
+    95,-71.38,-17.77
+    95,-71.46,-17.36
+    95,-73.44,-16.36
+    95,-75.24,-15.27
+    95,-76.01,-14.65
+    95,-76.42,-13.82
+    95,-76.26,-13.53
+    95,-77.11,-12.22
+    95,-78.09,-10.38
+    95,-79.04,-8.39
+    95,-79.45,-7.93
+    95,-79.76,-7.19
+    95,-80.54,-6.54
+    95,-81.25,-6.14
+    95,-80.93,-5.69
+    95,-81.41,-4.74
+    95,-81.10,-4.04
+    95,-80.30,-3.40
+    95,-79.77,-2.66
+    95,-79.99,-2.22
+    95,-80.37,-2.69
+    95,-80.97,-2.25
+    95,-80.76,-1.97
+    95,-80.93,-1.06
+    95,-80.58,-0.91
+    95,-80.40,-0.28
+    95,-80.02,0.36
+    95,-80.09,0.77
+    95,-79.54,0.98
+    95,-78.86,1.38
+    95,-78.99,1.69
+    95,-78.62,1.77
+    95,-78.66,2.27
+    95,-78.43,2.63
+    95,-77.93,2.70
+    95,-77.51,3.33
+    95,-77.13,3.85
+    95,-77.50,4.09
+    95,-77.31,4.67
+    95,-77.53,5.58
+    95,-77.32,5.85
+    95,-77.48,6.69
+    95,-77.88,7.22
+    95,-78.21,7.51
+    95,-78.43,8.05
+    95,-78.18,8.32
+    95,-78.44,8.39
+    95,-78.62,8.72
+    95,-79.12,9.00
+    95,-79.56,8.93
+    95,-79.76,8.58
+    95,-80.16,8.33
+    95,-80.38,8.30
+    95,-80.48,8.09
+    95,-80.00,7.55
+    95,-80.28,7.42
+    95,-80.42,7.27
+    95,-80.89,7.22
+    95,-81.06,7.82
+    95,-81.19,7.65
+    95,-81.52,7.71
+    95,-81.72,8.11
+    95,-82.13,8.18
+    95,-82.39,8.29
+    95,-82.82,8.29
+    95,-82.85,8.07
+    95,-82.97,8.23
+    95,-83.51,8.45
+    95,-83.71,8.66
+    95,-83.60,8.83
+    95,-83.63,9.05
+    95,-83.91,9.29
+    95,-84.30,9.49
+    95,-84.65,9.62
+    95,-84.71,9.91
+    95,-84.98,10.09
+    95,-84.91,9.80
+    95,-85.11,9.56
+    95,-85.34,9.83
+    95,-85.66,9.93
+    95,-85.80,10.13
+    95,-85.79,10.44
+    95,-85.66,10.75
+    95,-85.94,10.90
+    95,-85.71,11.09
+    95,-86.06,11.40
+    95,-86.53,11.81
+    95,-86.75,12.14
+    95,-87.17,12.46
+    95,-87.67,12.91
+    95,-87.56,13.06
+    95,-87.39,12.91
+    95,-87.32,12.98
+    95,-87.49,13.30
+    95,-87.79,13.38
+    95,-87.90,13.15
+    95,-88.48,13.16
+    95,-88.84,13.26
+    95,-89.26,13.46
+    95,-89.81,13.52
+    95,-90.10,13.74
+    95,-90.61,13.91
+    95,-91.23,13.93
+    95,-91.69,14.13
+    95,-92.23,14.54
+    95,-93.36,15.62
+    95,-93.88,15.94
+    95,-94.69,16.20
+    95,-95.25,16.13
+    95,-96.05,15.75
+    95,-96.56,15.65
+    95,-97.26,15.92
+    95,-98.01,16.11
+    95,-98.95,16.57
+    95,-99.70,16.71
+    95,-100.83,17.17
+    95,-101.67,17.65
+    95,-101.92,17.92
+    95,-102.48,17.98
+    95,-103.50,18.29
+    95,-103.92,18.75
+    95,-104.99,19.32
+    95,-105.49,19.95
+    95,-105.73,20.43
+    95,-105.40,20.53
+    95,-105.50,20.82
+    95,-105.27,21.08
+    95,-105.27,21.42
+    95,-105.60,21.87
+    95,-105.69,22.27
+    95,-106.03,22.77
+    95,-106.91,23.77
+    95,-107.92,24.55
+    95,-108.40,25.17
+    95,-109.26,25.58
+    95,-109.44,25.82
+    95,-109.29,26.44
+    95,-109.80,26.68
+    95,-110.39,27.16
+    95,-110.64,27.86
+    95,-111.18,27.94
+    95,-111.76,28.47
+    95,-112.23,28.95
+    95,-112.27,29.27
+    95,-112.81,30.02
+    95,-113.16,30.79
+    95,-113.15,31.17
+    95,-113.87,31.57
+    95,-114.21,31.52
+    95,-114.78,31.80
+    95,-114.94,31.39
+    95,-114.77,30.91
+    95,-114.67,30.16
+    95,-114.33,29.75
+    95,-113.59,29.06
+    95,-113.42,28.83
+    95,-113.27,28.75
+    95,-113.14,28.41
+    95,-112.96,28.43
+    95,-112.76,27.78
+    95,-112.46,27.53
+    95,-112.24,27.17
+    95,-111.62,26.66
+    95,-111.28,25.73
+    95,-110.99,25.29
+    95,-110.71,24.83
+    95,-110.66,24.30
+    95,-110.17,24.27
+    95,-109.77,23.81
+    95,-109.41,23.36
+    95,-109.43,23.19
+    95,-109.85,22.82
+    95,-110.03,22.82
+    95,-110.29,23.43
+    95,-110.95,24.00
+    95,-111.67,24.48
+    95,-112.18,24.74
+    95,-112.15,25.47
+    95,-112.30,26.01
+    95,-112.78,26.32
+    95,-113.46,26.77
+    95,-113.60,26.64
+    95,-113.85,26.90
+    95,-114.47,27.14
+    95,-115.06,27.72
+    95,-114.98,27.80
+    95,-114.57,27.74
+    95,-114.20,28.12
+    95,-114.16,28.57
+    95,-114.93,29.28
+    95,-115.52,29.56
+    95,-115.89,30.18
+    95,-116.26,30.84
+    95,-116.72,31.64
+    95,-117.13,32.54
+    95,-117.30,33.05
+    95,-117.94,33.62
+    95,-118.41,33.74
+    95,-118.52,34.03
+    95,-119.08,34.08
+    95,-119.44,34.35
+    95,-120.37,34.45
+    95,-120.62,34.61
+    95,-120.74,35.16
+    95,-121.71,36.16
+    95,-122.55,37.55
+    95,-122.51,37.78
+    95,-122.95,38.11
+    95,-123.73,38.95
+    95,-123.87,39.77
+    95,-124.40,40.31
+    95,-124.18,41.14
+    95,-124.21,42.00
+    95,-124.53,42.77
+    95,-124.14,43.71
+    95,-123.90,45.52
+    95,-124.08,46.86
+    95,-124.40,47.72
+    95,-124.69,48.18
+    95,-124.57,48.38
+    95,-123.12,48.04
+    95,-122.59,47.10
+    95,-122.34,47.36
+    95,-122.50,48.18
+    95,-122.84,49.00
+    95,-122.97,49.00
+    95,-124.91,49.98
+    95,-125.62,50.42
+    95,-127.44,50.83
+    95,-127.99,51.72
+    95,-127.85,52.33
+    95,-129.13,52.76
+    95,-129.31,53.56
+    95,-130.51,54.29
+    95,-130.54,54.80
+    95,-131.09,55.18
+    95,-131.97,55.50
+    95,-132.25,56.37
+    95,-133.54,57.18
+    95,-134.08,58.12
+    95,-135.04,58.19
+    95,-136.63,58.21
+    95,-137.80,58.50
+    95,-139.87,59.54
+    95,-140.83,59.73
+    95,-142.57,60.08
+    95,-143.96,60.00
+    95,-145.93,60.46
+    95,-147.11,60.88
+    95,-148.22,60.67
+    95,-148.02,59.98
+    95,-148.57,59.91
+    95,-149.73,59.71
+    95,-150.61,59.37
+    95,-151.72,59.16
+    95,-151.86,59.75
+    95,-151.41,60.73
+    95,-150.35,61.03
+    95,-150.62,61.28
+    95,-151.90,60.73
+    95,-152.58,60.06
+    95,-154.02,59.35
+    95,-153.29,58.86
+    95,-154.23,58.15
+    95,-155.31,57.73
+    95,-156.31,57.42
+    95,-156.56,56.98
+    95,-158.12,56.46
+    95,-158.43,55.99
+    95,-159.60,55.57
+    95,-160.29,55.64
+    95,-161.22,55.36
+    95,-162.24,55.02
+    95,-163.07,54.69
+    95,-164.79,54.40
+    95,-164.94,54.57
+    95,-163.85,55.04
+    95,-162.87,55.35
+    95,-161.80,55.90
+    95,-160.56,56.01
+    95,-160.07,56.42
+    95,-158.68,57.02
+    95,-158.46,57.22
+    95,-157.72,57.57
+    95,-157.55,58.33
+    95,-157.04,58.92
+    95,-158.19,58.62
+    95,-158.52,58.79
+    95,-159.06,58.42
+    95,-159.71,58.93
+    95,-159.98,58.57
+    95,-160.36,59.07
+    95,-161.35,58.67
+    95,-161.97,58.67
+    95,-162.05,59.27
+    95,-161.87,59.63
+    95,-162.52,59.99
+    95,-163.82,59.80
+    95,-164.66,60.27
+    95,-165.35,60.51
+    95,-165.35,61.07
+    95,-166.12,61.50
+    95,-165.73,62.08
+    95,-164.92,62.63
+    95,-164.56,63.15
+    95,-163.75,63.22
+    95,-163.07,63.06
+    95,-162.26,63.54
+    95,-161.53,63.46
+    95,-160.77,63.77
+    95,-160.96,64.22
+    95,-161.52,64.40
+    95,-160.78,64.79
+    95,-161.39,64.78
+    95,-162.45,64.56
+    95,-162.76,64.34
+    95,-163.55,64.56
+    95,-164.96,64.45
+    95,-166.43,64.69
+    95,-166.84,65.09
+    95,-168.11,65.67
+    95,-166.71,66.09
+    95,-164.47,66.58
+    95,-163.65,66.58
+    95,-163.79,66.08
+    95,-161.68,66.12
+    95,-162.49,66.74
+    95,-163.72,67.12
+    95,-164.43,67.62
+    95,-165.39,68.04
+    95,-166.76,68.36
+    95,-166.20,68.88
+    95,-164.43,68.92
+    95,-163.17,69.37
+    95,-162.93,69.86
+    95,-161.91,70.33
+    95,-160.93,70.45
+    95,-159.04,70.89
+    95,-158.12,70.82
+    95,-156.58,71.36
+    95,-155.07,71.15
+    95,-154.34,70.70
+    95,-153.90,70.89
+    95,-152.21,70.83
+    95,-152.27,70.60
+    95,-150.74,70.43
+    95,-149.72,70.53
+    95,-147.61,70.21
+    95,-145.69,70.12
+    95,-144.92,69.99
+    95,-143.59,70.15
+    95,-142.07,69.85
+    95,-140.99,69.71
+    95,-139.12,69.47
+    95,-137.55,68.99
+    95,-136.50,68.90
+    95,-135.63,69.32
+    95,-134.41,69.63
+    95,-132.93,69.51
+    95,-131.43,69.94
+    95,-129.79,70.19
+    95,-129.11,69.78
+    95,-128.36,70.01
+    95,-128.14,70.48
+    95,-127.45,70.38
+    95,-125.76,69.48
+    95,-124.42,70.16
+    95,-124.29,69.40
+    95,-123.06,69.56
+    95,-122.68,69.86
+    95,-121.47,69.80
+    95,-119.94,69.38
+    95,-117.60,69.01
+    95,-116.23,68.84
+    95,-115.25,68.91
+    95,-113.90,68.40
+    95,-115.30,67.90
+    95,-113.50,67.69
+    95,-110.80,67.81
+    95,-109.95,67.98
+    95,-108.88,67.38
+    95,-107.79,67.89
+    95,-108.81,68.31
+    95,-108.17,68.65
+    95,-106.95,68.70
+    95,-106.15,68.80
+    95,-105.34,68.56
+    95,-104.34,68.02
+    95,-103.22,68.10
+    95,-101.45,67.65
+    95,-99.90,67.81
+    95,-98.44,67.78
+    95,-98.56,68.40
+    95,-97.67,68.58
+    95,-96.12,68.24
+    95,-96.13,67.29
+    95,-95.49,68.09
+    95,-94.68,68.06
+    95,-94.23,69.07
+    95,-95.30,69.69
+    95,-96.47,70.09
+    95,-96.39,71.19
+    95,-95.21,71.92
+    95,-93.89,71.76
+    95,-92.88,71.32
+    95,-91.52,70.19
+    95,-92.41,69.70
+    95,-90.55,69.50
+    96,-114.17,73.12
+    96,-114.67,72.65
+    96,-112.44,72.96
+    96,-111.05,72.45
+    96,-109.92,72.96
+    96,-109.01,72.63
+    96,-108.19,71.65
+    96,-107.69,72.07
+    96,-108.40,73.09
+    96,-107.52,73.24
+    96,-106.52,73.08
+    96,-105.40,72.67
+    96,-104.77,71.70
+    96,-104.46,70.99
+    96,-102.79,70.50
+    96,-100.98,70.02
+    96,-101.09,69.58
+    96,-102.73,69.50
+    96,-102.09,69.12
+    96,-102.43,68.75
+    96,-104.24,68.91
+    96,-105.96,69.18
+    96,-107.12,69.12
+    96,-109.00,68.78
+    96,-111.97,68.60
+    96,-113.31,68.54
+    96,-113.85,69.01
+    96,-115.22,69.28
+    96,-116.11,69.17
+    96,-117.34,69.96
+    96,-116.67,70.07
+    96,-115.13,70.24
+    96,-113.72,70.19
+    96,-112.42,70.37
+    96,-114.35,70.60
+    96,-116.49,70.52
+    96,-117.90,70.54
+    96,-118.43,70.91
+    96,-116.11,71.31
+    96,-117.66,71.30
+    96,-119.40,71.56
+    96,-118.56,72.31
+    96,-117.87,72.71
+    96,-115.19,73.31
+    96,-114.17,73.12
+    97,-104.50,73.42
+    97,-105.38,72.76
+    97,-106.94,73.46
+    97,-106.60,73.60
+    97,-105.26,73.64
+    97,-104.50,73.42
+    98,-76.34,73.10
+    98,-76.25,72.83
+    98,-77.31,72.86
+    98,-78.39,72.88
+    98,-79.49,72.74
+    98,-79.78,72.80
+    98,-80.88,73.33
+    98,-80.83,73.69
+    98,-80.35,73.76
+    98,-78.06,73.65
+    98,-76.34,73.10
+    99,-86.56,73.16
+    99,-85.77,72.53
+    99,-84.85,73.34
+    99,-82.32,73.75
+    99,-80.60,72.72
+    99,-80.75,72.06
+    99,-78.77,72.35
+    99,-77.82,72.75
+    99,-75.61,72.24
+    99,-74.23,71.77
+    99,-74.10,71.33
+    99,-72.24,71.56
+    99,-71.20,70.92
+    99,-68.79,70.53
+    99,-67.91,70.12
+    99,-66.97,69.19
+    99,-68.81,68.72
+    99,-66.45,68.07
+    99,-64.86,67.85
+    99,-63.42,66.93
+    99,-61.85,66.86
+    99,-62.16,66.16
+    99,-63.92,65.00
+    99,-65.15,65.43
+    99,-66.72,66.39
+    99,-68.02,66.26
+    99,-68.14,65.69
+    99,-67.09,65.11
+    99,-65.73,64.65
+    99,-65.32,64.38
+    99,-64.67,63.39
+    99,-65.01,62.67
+    99,-66.28,62.95
+    99,-68.78,63.75
+    99,-67.37,62.88
+    99,-66.33,62.28
+    99,-66.17,61.93
+    99,-68.88,62.33
+    99,-71.02,62.91
+    99,-72.24,63.40
+    99,-71.89,63.68
+    99,-73.38,64.19
+    99,-74.83,64.68
+    99,-74.82,64.39
+    99,-77.71,64.23
+    99,-78.56,64.57
+    99,-77.90,65.31
+    99,-76.02,65.33
+    99,-73.96,65.45
+    99,-74.29,65.81
+    99,-73.94,66.31
+    99,-72.65,67.28
+    99,-72.93,67.73
+    99,-73.31,68.07
+    99,-74.84,68.55
+    99,-76.87,68.89
+    99,-76.23,69.15
+    99,-77.29,69.77
+    99,-78.17,69.83
+    99,-78.96,70.17
+    99,-79.49,69.87
+    99,-81.31,69.74
+    99,-84.94,69.97
+    99,-87.06,70.26
+    99,-88.68,70.41
+    99,-89.51,70.76
+    99,-88.47,71.22
+    99,-89.89,71.22
+    99,-90.21,72.24
+    99,-89.44,73.13
+    99,-88.41,73.54
+    99,-85.83,73.80
+    99,-86.56,73.16
+    100,-100.36,73.84
+    100,-99.16,73.63
+    100,-97.38,73.76
+    100,-97.12,73.47
+    100,-98.05,72.99
+    100,-96.54,72.56
+    100,-96.72,71.66
+    100,-98.36,71.27
+    100,-99.32,71.36
+    100,-100.01,71.74
+    100,-102.50,72.51
+    100,-102.48,72.83
+    100,-100.44,72.71
+    100,-101.54,73.36
+    100,-100.36,73.84
+    101,143.60,73.21
+    101,142.09,73.21
+    101,140.04,73.32
+    101,139.86,73.37
+    101,140.81,73.77
+    101,142.06,73.86
+    101,143.48,73.48
+    101,143.60,73.21
+    102,-93.20,72.77
+    102,-94.27,72.02
+    102,-95.41,72.06
+    102,-96.03,72.94
+    102,-96.02,73.44
+    102,-95.50,73.86
+    102,-94.50,74.13
+    102,-92.42,74.10
+    102,-90.51,73.86
+    102,-92.00,72.97
+    102,-93.20,72.77
+    103,-120.46,71.40
+    103,-123.09,70.90
+    103,-123.62,71.34
+    103,-125.93,71.87
+    103,-125.59,72.19
+    103,-124.81,73.02
+    103,-123.94,73.68
+    103,-124.92,74.29
+    103,-121.54,74.45
+    103,-120.11,74.24
+    103,-117.56,74.19
+    103,-116.58,73.90
+    103,-115.51,73.48
+    103,-116.77,73.22
+    103,-119.22,72.52
+    103,-120.46,71.82
+    103,-120.46,71.40
+    104,150.73,75.08
+    104,149.58,74.69
+    104,147.98,74.78
+    104,146.12,75.17
+    104,146.36,75.50
+    104,148.22,75.35
+    104,150.73,75.08
+    105,-93.61,74.98
+    105,-94.16,74.59
+    105,-95.61,74.67
+    105,-96.82,74.93
+    105,-96.29,75.38
+    105,-94.85,75.65
+    105,-93.98,75.30
+    105,-93.61,74.98
+    106,145.09,75.56
+    106,144.30,74.82
+    106,140.61,74.85
+    106,138.96,74.61
+    106,136.97,75.26
+    106,137.51,75.95
+    106,138.83,76.14
+    106,141.47,76.09
+    106,145.09,75.56
+    107,-98.50,76.72
+    107,-97.74,76.26
+    107,-97.70,75.74
+    107,-98.16,75.00
+    107,-99.81,74.90
+    107,-100.88,75.06
+    107,-100.86,75.64
+    107,-102.50,75.56
+    107,-102.57,76.34
+    107,-101.49,76.31
+    107,-99.98,76.65
+    107,-98.58,76.59
+    107,-98.50,76.72
+    108,-108.21,76.20
+    108,-107.82,75.85
+    108,-106.93,76.01
+    108,-105.88,75.97
+    108,-105.70,75.48
+    108,-106.31,75.01
+    108,-109.70,74.85
+    108,-112.22,74.42
+    108,-113.74,74.39
+    108,-113.87,74.72
+    108,-111.79,75.16
+    108,-116.31,75.04
+    108,-117.71,75.22
+    108,-116.35,76.20
+    108,-115.40,76.48
+    108,-112.59,76.14
+    108,-110.81,75.55
+    108,-109.07,75.47
+    108,-110.50,76.43
+    108,-109.58,76.79
+    108,-108.55,76.68
+    108,-108.21,76.20
+    109,57.54,70.72
+    109,56.94,70.63
+    109,53.68,70.76
+    109,53.41,71.21
+    109,51.60,71.47
+    109,51.46,72.01
+    109,52.48,72.23
+    109,52.44,72.77
+    109,54.43,73.63
+    109,53.51,73.75
+    109,55.90,74.63
+    109,55.63,75.08
+    109,57.87,75.61
+    109,61.17,76.25
+    109,64.50,76.44
+    109,66.21,76.81
+    109,68.16,76.94
+    109,68.85,76.54
+    109,68.18,76.23
+    109,64.64,75.74
+    109,61.58,75.26
+    109,58.48,74.31
+    109,56.99,73.33
+    109,55.42,72.37
+    109,55.62,71.54
+    109,57.54,70.72
+    110,-94.68,77.10
+    110,-93.57,76.78
+    110,-91.61,76.78
+    110,-90.74,76.45
+    110,-90.97,76.07
+    110,-89.82,75.85
+    110,-89.19,75.61
+    110,-87.84,75.57
+    110,-86.38,75.48
+    110,-84.79,75.70
+    110,-82.75,75.78
+    110,-81.13,75.71
+    110,-80.06,75.34
+    110,-79.83,74.92
+    110,-80.46,74.66
+    110,-81.95,74.44
+    110,-83.23,74.56
+    110,-86.10,74.41
+    110,-88.15,74.39
+    110,-89.76,74.52
+    110,-92.42,74.84
+    110,-92.77,75.39
+    110,-92.89,75.88
+    110,-93.89,76.32
+    110,-95.96,76.44
+    110,-97.12,76.75
+    110,-96.75,77.16
+    110,-94.68,77.10
+    111,-116.20,77.65
+    111,-116.34,76.88
+    111,-117.11,76.53
+    111,-118.04,76.48
+    111,-119.90,76.05
+    111,-121.50,75.90
+    111,-122.85,76.12
+    111,-122.85,76.12
+    111,-121.16,76.86
+    111,-119.10,77.51
+    111,-117.57,77.50
+    111,-116.20,77.65
+    112,106.97,76.97
+    112,107.24,76.48
+    112,108.15,76.72
+    112,111.08,76.71
+    112,113.33,76.22
+    112,114.13,75.85
+    112,113.89,75.33
+    112,112.78,75.03
+    112,110.15,74.48
+    112,109.40,74.18
+    112,110.64,74.04
+    112,112.12,73.79
+    112,113.02,73.98
+    112,113.53,73.34
+    112,113.97,73.59
+    112,115.57,73.75
+    112,118.78,73.59
+    112,119.02,73.12
+    112,123.20,72.97
+    112,123.26,73.74
+    112,125.38,73.56
+    112,126.98,73.57
+    112,128.59,73.04
+    112,129.05,72.40
+    112,128.46,71.98
+    112,129.72,71.19
+    112,131.29,70.79
+    112,132.25,71.84
+    112,133.86,71.39
+    112,135.56,71.66
+    112,137.50,71.35
+    112,138.23,71.63
+    112,139.87,71.49
+    112,139.15,72.42
+    112,140.47,72.85
+    112,149.50,72.20
+    112,150.35,71.61
+    112,152.97,70.84
+    112,157.01,71.03
+    112,159.00,70.87
+    112,159.83,70.45
+    112,159.71,69.72
+    112,160.94,69.44
+    112,162.28,69.64
+    112,164.05,69.67
+    112,165.94,69.47
+    112,167.84,69.58
+    112,169.58,68.69
+    112,170.82,69.01
+    112,170.01,69.65
+    112,170.45,70.10
+    112,173.64,69.82
+    112,175.72,69.88
+    112,178.60,69.40
+    112,180.00,68.96
+    112,180.00,64.98
+    112,179.99,64.97
+    112,178.71,64.53
+    112,177.41,64.61
+    112,178.31,64.08
+    112,178.91,63.25
+    112,179.37,62.98
+    112,179.49,62.57
+    112,179.23,62.30
+    112,177.36,62.52
+    112,174.57,61.77
+    112,173.68,61.65
+    112,172.15,60.95
+    112,170.70,60.34
+    112,170.33,59.88
+    112,168.90,60.57
+    112,166.30,59.79
+    112,165.84,60.16
+    112,164.88,59.73
+    112,163.54,59.87
+    112,163.22,59.21
+    112,162.02,58.24
+    112,162.05,57.84
+    112,163.19,57.62
+    112,163.06,56.16
+    112,162.13,56.12
+    112,161.70,55.29
+    112,162.12,54.86
+    112,160.37,54.34
+    112,160.02,53.20
+    112,158.53,52.96
+    112,158.23,51.94
+    112,156.79,51.01
+    112,156.42,51.70
+    112,155.99,53.16
+    112,155.43,55.38
+    112,155.91,56.77
+    112,156.76,57.36
+    112,156.81,57.83
+    112,158.36,58.06
+    112,160.15,59.31
+    112,161.87,60.34
+    112,163.67,61.14
+    112,164.47,62.55
+    112,163.26,62.47
+    112,162.66,61.64
+    112,160.12,60.54
+    112,159.30,61.77
+    112,156.72,61.43
+    112,154.22,59.76
+    112,155.04,59.15
+    112,152.81,58.88
+    112,151.27,58.78
+    112,151.34,59.50
+    112,149.78,59.66
+    112,148.54,59.16
+    112,145.49,59.34
+    112,142.20,59.04
+    112,138.96,57.09
+    112,135.13,54.73
+    112,136.70,54.60
+    112,137.19,53.98
+    112,138.16,53.76
+    112,138.80,54.25
+    112,139.90,54.19
+    112,141.35,53.09
+    112,141.38,52.24
+    112,140.60,51.24
+    112,140.51,50.05
+    112,140.06,48.45
+    112,138.55,47.00
+    112,138.22,46.31
+    112,136.86,45.14
+    112,135.52,43.99
+    112,134.87,43.40
+    112,133.54,42.81
+    112,132.91,42.80
+    112,132.28,43.28
+    112,130.94,42.55
+    112,130.78,42.22
+    112,130.40,42.28
+    112,129.97,41.94
+    112,129.67,41.60
+    112,129.71,40.88
+    112,129.19,40.66
+    112,129.01,40.49
+    112,128.63,40.19
+    112,127.97,40.03
+    112,127.53,39.76
+    112,127.50,39.32
+    112,127.39,39.21
+    112,127.78,39.05
+    112,128.35,38.61
+    112,129.21,37.43
+    112,129.46,36.78
+    112,129.47,35.63
+    112,129.09,35.08
+    112,128.19,34.89
+    112,127.39,34.48
+    112,126.49,34.39
+    112,126.37,34.93
+    112,126.56,35.68
+    112,126.12,36.73
+    112,126.86,36.89
+    112,126.17,37.75
+    112,125.69,37.94
+    112,125.57,37.75
+    112,125.28,37.67
+    112,125.24,37.86
+    112,124.98,37.95
+    112,124.71,38.11
+    112,124.99,38.55
+    112,125.22,38.67
+    112,125.13,38.85
+    112,125.39,39.39
+    112,125.32,39.55
+    112,124.74,39.66
+    112,124.27,39.93
+    112,122.87,39.64
+    112,122.13,39.17
+    112,121.05,38.90
+    112,121.59,39.36
+    112,121.38,39.75
+    112,122.17,40.42
+    112,121.64,40.95
+    112,120.77,40.59
+    112,119.64,39.90
+    112,119.02,39.25
+    112,118.04,39.20
+    112,117.53,38.74
+    112,118.06,38.06
+    112,118.88,37.90
+    112,118.91,37.45
+    112,119.70,37.16
+    112,120.82,37.87
+    112,121.71,37.48
+    112,122.36,37.45
+    112,122.52,36.93
+    112,121.10,36.65
+    112,120.64,36.11
+    112,119.66,35.61
+    112,119.15,34.91
+    112,120.23,34.36
+    112,120.62,33.38
+    112,121.23,32.46
+    112,121.91,31.69
+    112,121.89,30.95
+    112,121.26,30.68
+    112,121.50,30.14
+    112,122.09,29.83
+    112,121.94,29.02
+    112,121.68,28.23
+    112,121.13,28.14
+    112,120.40,27.05
+    112,119.59,25.74
+    112,118.66,24.55
+    112,117.28,23.62
+    112,115.89,22.78
+    112,114.76,22.67
+    112,114.15,22.22
+    112,113.81,22.55
+    112,113.24,22.05
+    112,111.84,21.55
+    112,110.79,21.40
+    112,110.44,20.34
+    112,109.89,20.28
+    112,109.63,21.01
+    112,109.86,21.40
+    112,108.52,21.72
+    112,108.05,21.55
+    112,106.72,20.70
+    112,105.88,19.75
+    112,105.66,19.06
+    112,106.43,18.00
+    112,107.36,16.70
+    112,108.27,16.08
+    112,108.88,15.28
+    112,109.34,13.43
+    112,109.20,11.67
+    112,108.37,11.01
+    112,107.22,10.36
+    112,106.41,9.53
+    112,105.16,8.60
+    112,104.80,9.24
+    112,105.08,9.92
+    112,104.33,10.49
+    112,103.50,10.63
+    112,103.09,11.15
+    112,102.59,12.19
+    112,101.69,12.65
+    112,100.83,12.63
+    112,100.98,13.41
+    112,100.10,13.41
+    112,100.02,12.31
+    112,99.48,10.85
+    112,99.15,9.96
+    112,99.22,9.24
+    112,99.87,9.21
+    112,100.28,8.30
+    112,100.46,7.43
+    112,101.02,6.86
+    112,101.62,6.74
+    112,102.14,6.22
+    112,102.37,6.13
+    112,102.96,5.52
+    112,103.38,4.86
+    112,103.44,4.18
+    112,103.33,3.73
+    112,103.43,3.38
+    112,103.50,2.79
+    112,103.85,2.52
+    112,104.25,1.63
+    112,104.23,1.29
+    112,103.52,1.23
+    112,102.57,1.97
+    112,101.39,2.76
+    112,101.27,3.27
+    112,100.70,3.94
+    112,100.56,4.77
+    112,100.20,5.31
+    112,100.31,6.04
+    112,100.09,6.46
+    112,99.69,6.85
+    112,99.52,7.34
+    112,98.99,7.91
+    112,98.50,8.38
+    112,98.34,7.79
+    112,98.15,8.35
+    112,98.26,8.97
+    112,98.55,9.93
+    112,98.46,10.68
+    112,98.76,11.44
+    112,98.43,12.03
+    112,98.51,13.12
+    112,98.10,13.64
+    112,97.78,14.84
+    112,97.60,16.10
+    112,97.16,16.93
+    112,96.51,16.43
+    112,95.37,15.71
+    112,94.81,15.80
+    112,94.19,16.04
+    112,94.53,17.28
+    112,94.32,18.21
+    112,93.54,19.37
+    112,93.66,19.73
+    112,93.08,19.86
+    112,92.37,20.67
+    112,92.08,21.19
+    112,92.03,21.70
+    112,91.83,22.18
+    112,91.42,22.77
+    112,90.50,22.81
+    112,90.59,22.39
+    112,90.27,21.84
+    112,89.85,22.04
+    112,89.70,21.86
+    112,89.42,21.97
+    112,89.03,22.06
+    112,88.89,21.69
+    112,88.21,21.70
+    112,86.98,21.50
+    112,87.03,20.74
+    112,86.50,20.15
+    112,85.06,19.48
+    112,83.94,18.30
+    112,83.19,17.67
+    112,82.19,17.02
+    112,82.19,16.56
+    112,81.69,16.31
+    112,80.79,15.95
+    112,80.32,15.90
+    112,80.03,15.14
+    112,80.23,13.84
+    112,80.29,13.01
+    112,79.86,12.06
+    112,79.86,10.36
+    112,79.34,10.31
+    112,78.89,9.55
+    112,79.19,9.22
+    112,78.28,8.93
+    112,77.94,8.25
+    112,77.54,7.97
+    112,76.59,8.90
+    112,76.13,10.30
+    112,75.75,11.31
+    112,75.40,11.78
+    112,74.86,12.74
+    112,74.62,13.99
+    112,74.44,14.62
+    112,73.53,15.99
+    112,73.12,17.93
+    112,72.82,19.21
+    112,72.82,20.42
+    112,72.63,21.36
+    112,71.18,20.76
+    112,70.47,20.88
+    112,69.16,22.09
+    112,69.64,22.45
+    112,69.35,22.84
+    112,68.18,23.69
+    112,67.44,23.94
+    112,67.15,24.66
+    112,66.37,25.43
+    112,64.53,25.24
+    112,62.91,25.22
+    112,61.50,25.08
+    112,59.62,25.38
+    112,58.53,25.61
+    112,57.40,25.74
+    112,56.97,26.97
+    112,56.49,27.14
+    112,55.72,26.96
+    112,54.72,26.48
+    112,53.49,26.81
+    112,52.48,27.58
+    112,51.52,27.87
+    112,50.85,28.81
+    112,50.12,30.15
+    112,49.58,29.99
+    112,48.94,30.32
+    112,48.57,29.93
+    112,47.97,29.98
+    112,48.18,29.53
+    112,48.09,29.31
+    112,48.42,28.55
+    112,48.81,27.69
+    112,49.30,27.46
+    112,49.47,27.11
+    112,50.15,26.69
+    112,50.21,26.28
+    112,50.11,25.94
+    112,50.24,25.61
+    112,50.53,25.33
+    112,50.66,25.00
+    112,50.81,24.75
+    112,50.74,25.48
+    112,51.01,26.01
+    112,51.29,26.11
+    112,51.59,25.80
+    112,51.61,25.22
+    112,51.39,24.63
+    112,51.58,24.25
+    112,51.76,24.29
+    112,51.79,24.02
+    112,52.58,24.18
+    112,53.40,24.15
+    112,54.01,24.12
+    112,54.69,24.80
+    112,55.44,25.44
+    112,56.07,26.06
+    112,56.36,26.40
+    112,56.49,26.31
+    112,56.39,25.90
+    112,56.26,25.71
+    112,56.40,24.92
+    112,56.85,24.24
+    112,57.40,23.88
+    112,58.14,23.75
+    112,58.73,23.57
+    112,59.18,22.99
+    112,59.45,22.66
+    112,59.81,22.53
+    112,59.81,22.31
+    112,59.44,21.71
+    112,59.28,21.43
+    112,58.86,21.11
+    112,58.49,20.43
+    112,58.03,20.48
+    112,57.83,20.24
+    112,57.67,19.74
+    112,57.79,19.07
+    112,57.69,18.94
+    112,57.23,18.95
+    112,56.61,18.57
+    112,56.51,18.09
+    112,56.28,17.88
+    112,55.66,17.88
+    112,55.27,17.63
+    112,55.27,17.23
+    112,54.79,16.95
+    112,54.24,17.05
+    112,53.57,16.71
+    112,53.11,16.65
+    112,52.39,16.38
+    112,52.19,15.94
+    112,52.17,15.60
+    112,51.17,15.18
+    112,49.57,14.71
+    112,48.68,14.00
+    112,48.24,13.95
+    112,47.94,14.01
+    112,47.35,13.59
+    112,46.72,13.40
+    112,45.88,13.35
+    112,45.63,13.29
+    112,45.41,13.03
+    112,45.14,12.95
+    112,44.99,12.70
+    112,44.49,12.72
+    112,44.18,12.59
+    112,43.48,12.64
+    112,43.22,13.22
+    112,43.25,13.77
+    112,43.09,14.06
+    112,42.89,14.80
+    112,42.60,15.21
+    112,42.81,15.26
+    112,42.70,15.72
+    112,42.82,15.91
+    112,42.78,16.35
+    112,42.65,16.77
+    112,42.35,17.08
+    112,42.27,17.47
+    112,41.75,17.83
+    112,41.22,18.67
+    112,40.94,19.49
+    112,40.25,20.17
+    112,39.80,20.34
+    112,39.14,21.29
+    112,39.02,21.99
+    112,39.07,22.58
+    112,38.49,23.69
+    112,38.02,24.08
+    112,37.48,24.29
+    112,37.15,24.86
+    112,37.21,25.08
+    112,36.93,25.60
+    112,36.64,25.83
+    112,36.25,26.57
+    112,35.64,27.38
+    112,35.13,28.06
+    112,34.63,28.06
+    112,34.79,28.61
+    112,34.83,28.96
+    112,34.96,29.36
+    112,34.92,29.50
+    112,34.64,29.10
+    112,34.43,28.34
+    112,34.15,27.82
+    112,33.92,27.65
+    112,33.59,27.97
+    112,33.14,28.42
+    112,32.42,29.85
+    112,32.32,29.76
+    112,32.73,28.71
+    112,33.35,27.70
+    112,34.10,26.14
+    112,34.47,25.60
+    112,34.80,25.03
+    112,35.69,23.93
+    112,35.49,23.75
+    112,35.53,23.10
+    112,36.69,22.20
+    112,36.87,22.00
+    112,37.19,21.02
+    112,36.97,20.84
+    112,37.11,19.81
+    112,37.48,18.61
+    112,37.86,18.37
+    112,38.41,18.00
+    112,38.99,16.84
+    112,39.27,15.92
+    112,39.81,15.44
+    112,41.18,14.49
+    112,41.73,13.92
+    112,42.28,13.34
+    112,42.59,13.00
+    112,43.08,12.70
+    112,43.32,12.39
+    112,43.29,11.97
+    112,42.72,11.74
+    112,43.15,11.46
+    112,43.47,11.28
+    112,43.67,10.86
+    112,44.12,10.45
+    112,44.61,10.44
+    112,45.56,10.70
+    112,46.65,10.82
+    112,47.53,11.13
+    112,48.02,11.19
+    112,48.38,11.38
+    112,48.95,11.41
+    112,49.27,11.43
+    112,49.73,11.58
+    112,50.26,11.68
+    112,50.73,12.02
+    112,51.11,12.02
+    112,51.13,11.75
+    112,51.04,11.17
+    112,51.05,10.64
+    112,50.83,10.28
+    112,50.55,9.20
+    112,50.07,8.08
+    112,49.45,6.80
+    112,48.59,5.34
+    112,47.74,4.22
+    112,46.56,2.86
+    112,45.56,2.05
+    112,44.07,1.05
+    112,43.14,0.29
+    112,42.04,-0.92
+    112,41.81,-1.45
+    112,41.59,-1.68
+    112,40.88,-2.08
+    112,40.64,-2.50
+    112,40.26,-2.57
+    112,40.12,-3.28
+    112,39.80,-3.68
+    112,39.60,-4.35
+    112,39.20,-4.68
+    112,38.74,-5.91
+    112,38.80,-6.48
+    112,39.44,-6.84
+    112,39.47,-7.10
+    112,39.19,-7.70
+    112,39.25,-8.01
+    112,39.19,-8.49
+    112,39.54,-9.11
+    112,39.95,-10.10
+    112,40.32,-10.32
+    112,40.48,-10.77
+    112,40.44,-11.76
+    112,40.56,-12.64
+    112,40.60,-14.20
+    112,40.78,-14.69
+    112,40.48,-15.41
+    112,40.09,-16.10
+    112,39.45,-16.72
+    112,38.54,-17.10
+    112,37.41,-17.59
+    112,36.28,-18.66
+    112,35.90,-18.84
+    112,35.20,-19.55
+    112,34.79,-19.78
+    112,34.70,-20.50
+    112,35.18,-21.25
+    112,35.37,-21.84
+    112,35.39,-22.14
+    112,35.56,-22.09
+    112,35.53,-23.07
+    112,35.37,-23.54
+    112,35.61,-23.71
+    112,35.46,-24.12
+    112,35.04,-24.48
+    112,34.22,-24.82
+    112,33.01,-25.36
+    112,32.57,-25.73
+    112,32.66,-26.15
+    112,32.92,-26.22
+    112,32.83,-26.74
+    112,32.58,-27.47
+    112,32.46,-28.30
+    112,32.20,-28.75
+    112,31.52,-29.26
+    112,31.33,-29.40
+    112,30.90,-29.91
+    112,30.62,-30.42
+    112,30.06,-31.14
+    112,28.93,-32.17
+    112,28.22,-32.77
+    112,27.46,-33.23
+    112,26.42,-33.61
+    112,25.91,-33.67
+    112,25.78,-33.94
+    112,25.17,-33.80
+    112,24.68,-33.99
+    112,23.59,-33.79
+    112,22.99,-33.92
+    112,22.57,-33.86
+    112,21.54,-34.26
+    112,20.69,-34.42
+    112,20.07,-34.80
+    112,19.62,-34.82
+    112,19.19,-34.46
+    112,18.86,-34.44
+    112,18.42,-34.00
+    112,18.38,-34.14
+    112,18.24,-33.87
+    112,18.25,-33.28
+    112,17.93,-32.61
+    112,18.25,-32.43
+    112,18.22,-31.66
+    112,17.57,-30.73
+    112,17.06,-29.88
+    112,17.06,-29.88
+    112,16.35,-28.58
+    112,15.60,-27.82
+    112,15.21,-27.09
+    112,14.99,-26.12
+    112,14.74,-25.39
+    112,14.41,-23.85
+    112,14.39,-22.66
+    112,14.26,-22.11
+    112,13.87,-21.70
+    112,13.35,-20.87
+    112,12.83,-19.67
+    112,12.61,-19.05
+    112,11.79,-18.07
+    112,11.73,-17.30
+    112,11.64,-16.67
+    112,11.78,-15.79
+    112,12.12,-14.88
+    112,12.18,-14.45
+    112,12.50,-13.55
+    112,12.74,-13.14
+    112,13.31,-12.48
+    112,13.63,-12.04
+    112,13.74,-11.30
+    112,13.69,-10.73
+    112,13.39,-10.37
+    112,13.12,-9.77
+    112,12.88,-9.17
+    112,12.93,-8.96
+    112,13.24,-8.56
+    112,12.93,-7.60
+    112,12.73,-6.93
+    112,12.23,-6.29
+    112,12.32,-6.10
+    112,12.18,-5.79
+    112,11.92,-5.04
+    112,11.09,-3.98
+    112,10.07,-2.97
+    112,9.41,-2.14
+    112,8.80,-1.11
+    112,8.83,-0.78
+    112,9.05,-0.46
+    112,9.29,0.27
+    112,9.49,1.01
+    112,9.31,1.16
+    112,9.65,2.28
+    112,9.80,3.07
+    112,9.40,3.73
+    112,8.95,3.90
+    112,8.74,4.35
+    112,8.49,4.50
+    112,8.50,4.77
+    112,7.46,4.41
+    112,7.08,4.46
+    112,6.70,4.24
+    112,5.90,4.26
+    112,5.36,4.89
+    112,5.03,5.61
+    112,4.33,6.27
+    112,3.57,6.26
+    112,2.69,6.26
+    112,1.87,6.14
+    112,1.06,5.93
+    112,-0.51,5.34
+    112,-1.06,5.00
+    112,-1.96,4.71
+    112,-2.86,4.99
+    112,-3.31,4.98
+    112,-4.01,5.18
+    112,-4.65,5.17
+    112,-5.83,4.99
+    112,-6.53,4.71
+    112,-7.52,4.34
+    112,-7.71,4.36
+    112,-7.97,4.36
+    112,-9.00,4.83
+    112,-9.91,5.59
+    112,-10.77,6.14
+    112,-11.44,6.79
+    112,-11.71,6.86
+    112,-12.43,7.26
+    112,-12.95,7.80
+    112,-13.12,8.16
+    112,-13.25,8.90
+    112,-13.69,9.49
+    112,-14.07,9.89
+    112,-14.33,10.02
+    112,-14.58,10.21
+    112,-14.69,10.66
+    112,-14.84,10.88
+    112,-15.13,11.04
+    112,-15.66,11.46
+    112,-16.09,11.52
+    112,-16.31,11.81
+    112,-16.31,11.96
+    112,-16.61,12.17
+    112,-16.68,12.38
+    112,-16.84,13.15
+    112,-16.71,13.60
+    112,-17.13,14.37
+    112,-17.62,14.73
+    112,-17.19,14.92
+    112,-16.70,15.62
+    112,-16.46,16.14
+    112,-16.55,16.67
+    112,-16.27,17.17
+    112,-16.15,18.11
+    112,-16.26,19.10
+    112,-16.38,19.59
+    112,-16.28,20.09
+    112,-16.54,20.57
+    112,-17.06,21.00
+    112,-17.02,21.42
+    112,-16.97,21.89
+    112,-16.59,22.16
+    112,-16.26,22.68
+    112,-16.33,23.02
+    112,-15.98,23.72
+    112,-15.43,24.36
+    112,-15.09,24.52
+    112,-14.82,25.10
+    112,-14.80,25.64
+    112,-14.44,26.25
+    112,-13.77,26.62
+    112,-13.14,27.64
+    112,-12.62,28.04
+    112,-11.69,28.15
+    112,-10.90,28.83
+    112,-10.40,29.10
+    112,-9.56,29.93
+    112,-9.81,31.18
+    112,-9.43,32.04
+    112,-9.30,32.56
+    112,-8.66,33.24
+    112,-7.65,33.70
+    112,-6.91,34.11
+    112,-6.24,35.15
+    112,-5.93,35.76
+    112,-5.19,35.76
+    112,-4.59,35.33
+    112,-3.64,35.40
+    112,-2.60,35.18
+    112,-2.17,35.17
+    112,-1.21,35.71
+    112,-0.13,35.89
+    112,0.50,36.30
+    112,1.47,36.61
+    112,3.16,36.78
+    112,4.82,36.87
+    112,5.32,36.72
+    112,6.26,37.11
+    112,7.33,37.12
+    112,7.74,36.89
+    112,8.42,36.95
+    112,9.51,37.35
+    112,10.21,37.23
+    112,10.18,36.72
+    112,11.03,37.09
+    112,11.10,36.90
+    112,10.60,36.41
+    112,10.59,35.95
+    112,10.94,35.70
+    112,10.81,34.83
+    112,10.15,34.33
+    112,10.34,33.79
+    112,10.86,33.77
+    112,11.11,33.29
+    112,11.49,33.14
+    112,12.66,32.79
+    112,13.08,32.88
+    112,13.92,32.71
+    112,15.25,32.27
+    112,15.71,31.38
+    112,16.61,31.18
+    112,18.02,30.76
+    112,19.09,30.27
+    112,19.57,30.53
+    112,20.05,30.99
+    112,19.82,31.75
+    112,20.13,32.24
+    112,20.85,32.71
+    112,21.54,32.84
+    112,22.90,32.64
+    112,23.24,32.19
+    112,23.61,32.19
+    112,23.93,32.02
+    112,24.92,31.90
+    112,25.16,31.57
+    112,26.50,31.59
+    112,27.46,31.32
+    112,28.45,31.03
+    112,28.91,30.87
+    112,29.68,31.19
+    112,30.10,31.47
+    112,30.98,31.56
+    112,31.69,31.43
+    112,31.96,30.93
+    112,32.19,31.26
+    112,32.99,31.02
+    112,33.77,30.97
+    112,34.27,31.22
+    112,34.56,31.55
+    112,34.49,31.61
+    112,34.75,32.07
+    112,34.96,32.83
+    112,35.10,33.08
+    112,35.13,33.09
+    112,35.48,33.91
+    112,35.98,34.61
+    112,36.00,34.64
+    112,35.91,35.41
+    112,36.15,35.82
+    112,35.78,36.28
+    112,36.16,36.65
+    112,35.55,36.57
+    112,34.71,36.80
+    112,34.03,36.22
+    112,32.51,36.11
+    112,31.70,36.64
+    112,30.62,36.68
+    112,30.39,36.26
+    112,29.70,36.14
+    112,28.73,36.68
+    112,27.64,36.66
+    112,27.05,37.65
+    112,26.32,38.21
+    112,26.80,38.99
+    112,26.17,39.46
+    112,27.28,40.42
+    112,28.82,40.46
+    112,29.24,41.22
+    112,31.15,41.09
+    112,32.35,41.74
+    112,33.51,42.02
+    112,35.17,42.04
+    112,36.91,41.34
+    112,38.35,40.95
+    112,39.51,41.10
+    112,40.37,41.01
+    112,41.55,41.54
+    112,41.70,41.96
+    112,41.45,42.65
+    112,40.88,43.01
+    112,40.32,43.13
+    112,39.96,43.44
+    112,38.68,44.28
+    112,37.54,44.66
+    112,36.68,45.24
+    112,37.40,45.40
+    112,38.23,46.24
+    112,37.67,46.64
+    112,39.15,47.04
+    112,39.12,47.26
+    112,38.22,47.10
+    112,37.43,47.02
+    112,36.76,46.70
+    112,35.82,46.65
+    112,34.96,46.27
+    112,35.02,45.65
+    112,35.51,45.41
+    112,36.53,45.47
+    112,36.33,45.11
+    112,35.24,44.94
+    112,33.88,44.36
+    112,33.33,44.56
+    112,33.55,45.03
+    112,32.45,45.33
+    112,32.63,45.52
+    112,33.59,45.85
+    112,33.30,46.08
+    112,31.74,46.33
+    112,31.68,46.71
+    112,30.75,46.58
+    112,30.38,46.03
+    112,29.60,45.29
+    112,29.63,45.04
+    112,29.14,44.82
+    112,28.84,44.91
+    112,28.56,43.71
+    112,28.04,43.29
+    112,27.67,42.58
+    112,28.00,42.01
+    112,28.12,41.62
+    112,28.99,41.30
+    112,28.81,41.05
+    112,27.62,41.00
+    112,27.19,40.69
+    112,26.36,40.15
+    112,26.04,40.62
+    112,26.06,40.82
+    112,25.45,40.85
+    112,24.93,40.95
+    112,23.71,40.69
+    112,24.41,40.13
+    112,23.90,39.96
+    112,23.34,39.96
+    112,22.81,40.48
+    112,22.63,40.26
+    112,22.85,39.66
+    112,23.35,39.19
+    112,22.97,38.97
+    112,23.53,38.51
+    112,24.03,38.22
+    112,24.04,37.66
+    112,23.12,37.92
+    112,23.41,37.41
+    112,22.78,37.31
+    112,23.15,36.42
+    112,22.49,36.41
+    112,21.67,36.85
+    112,21.30,37.65
+    112,21.12,38.31
+    112,20.73,38.77
+    112,20.22,39.34
+    112,20.15,39.63
+    112,19.98,39.70
+    112,19.96,39.92
+    112,19.41,40.25
+    112,19.32,40.73
+    112,19.40,41.41
+    112,19.54,41.72
+    112,19.37,41.88
+    112,19.16,41.96
+    112,18.88,42.28
+    112,18.45,42.48
+    112,17.51,42.85
+    112,16.93,43.21
+    112,16.02,43.51
+    112,15.17,44.24
+    112,15.38,44.32
+    112,14.92,44.74
+    112,14.90,45.08
+    112,14.26,45.23
+    112,13.95,44.80
+    112,13.66,45.14
+    112,13.68,45.48
+    112,13.72,45.50
+    112,13.94,45.59
+    112,13.14,45.74
+    112,12.33,45.38
+    112,12.38,44.89
+    112,12.26,44.60
+    112,12.59,44.09
+    112,13.53,43.59
+    112,14.03,42.76
+    112,15.14,41.96
+    112,15.93,41.96
+    112,16.17,41.74
+    112,15.89,41.54
+    112,16.79,41.18
+    112,17.52,40.88
+    112,18.38,40.36
+    112,18.48,40.17
+    112,18.29,39.81
+    112,17.74,40.28
+    112,16.87,40.44
+    112,16.45,39.80
+    112,17.17,39.42
+    112,17.05,38.90
+    112,16.64,38.84
+    112,16.10,37.99
+    112,15.68,37.91
+    112,15.69,38.21
+    112,15.89,38.75
+    112,16.11,38.96
+    112,15.72,39.54
+    112,15.41,40.05
+    112,15.00,40.17
+    112,14.70,40.60
+    112,14.06,40.79
+    112,13.63,41.19
+    112,12.89,41.25
+    112,12.11,41.70
+    112,11.19,42.36
+    112,10.51,42.93
+    112,10.20,43.92
+    112,9.70,44.04
+    112,8.89,44.37
+    112,8.43,44.23
+    112,7.85,43.77
+    112,7.44,43.69
+    112,6.53,43.13
+    112,4.56,43.40
+    112,3.10,43.08
+    112,2.99,42.47
+    112,3.04,41.89
+    112,2.09,41.23
+    112,0.81,41.01
+    112,0.72,40.68
+    112,0.11,40.12
+    112,-0.28,39.31
+    112,0.11,38.74
+    112,-0.47,38.29
+    112,-0.68,37.64
+    112,-1.44,37.44
+    112,-2.15,36.67
+    112,-3.42,36.66
+    112,-4.37,36.68
+    112,-5.00,36.32
+    112,-5.38,35.95
+    112,-5.87,36.03
+    112,-6.24,36.37
+    112,-6.52,36.94
+    112,-7.45,37.10
+    112,-7.86,36.84
+    112,-8.38,36.98
+    112,-8.90,36.87
+    112,-8.75,37.65
+    112,-8.84,38.27
+    112,-9.29,38.36
+    112,-9.53,38.74
+    112,-9.45,39.39
+    112,-9.05,39.76
+    112,-8.98,40.16
+    112,-8.77,40.76
+    112,-8.79,41.18
+    112,-8.99,41.54
+    112,-9.03,41.88
+    112,-8.98,42.59
+    112,-9.39,43.03
+    112,-7.98,43.75
+    112,-6.75,43.57
+    112,-5.41,43.57
+    112,-4.35,43.40
+    112,-3.52,43.46
+    112,-1.90,43.42
+    112,-1.38,44.02
+    112,-1.19,46.01
+    112,-2.23,47.06
+    112,-2.96,47.57
+    112,-4.49,47.96
+    112,-4.59,48.68
+    112,-3.30,48.90
+    112,-1.62,48.64
+    112,-1.93,49.78
+    112,-0.99,49.35
+    112,1.34,50.13
+    112,1.64,50.95
+    112,2.51,51.15
+    112,3.32,51.35
+    112,3.83,51.62
+    112,4.71,53.09
+    112,6.07,53.51
+    112,6.91,53.48
+    112,7.10,53.69
+    112,7.94,53.75
+    112,8.12,53.53
+    112,8.80,54.02
+    112,8.57,54.40
+    112,8.53,54.96
+    112,8.12,55.52
+    112,8.09,56.54
+    112,8.26,56.81
+    112,8.54,57.11
+    112,9.42,57.17
+    112,9.78,57.45
+    112,10.58,57.73
+    112,10.55,57.22
+    112,10.25,56.89
+    112,10.37,56.61
+    112,10.91,56.46
+    112,10.67,56.08
+    112,10.37,56.19
+    112,9.65,55.47
+    112,9.92,54.98
+    112,9.94,54.60
+    112,10.95,54.36
+    112,10.94,54.01
+    112,11.96,54.20
+    112,12.52,54.47
+    112,13.65,54.08
+    112,14.12,53.76
+    112,14.80,54.05
+    112,16.36,54.51
+    112,17.62,54.85
+    112,18.62,54.68
+    112,18.70,54.44
+    112,19.66,54.43
+    112,19.89,54.87
+    112,21.27,55.19
+    112,21.06,56.03
+    112,21.09,56.78
+    112,21.58,57.41
+    112,22.52,57.75
+    112,23.32,57.01
+    112,24.12,57.03
+    112,24.31,57.79
+    112,24.43,58.38
+    112,24.06,58.26
+    112,23.43,58.61
+    112,23.34,59.19
+    112,24.60,59.47
+    112,25.86,59.61
+    112,26.95,59.45
+    112,27.98,59.48
+    112,29.12,60.03
+    112,28.07,60.50
+    112,26.26,60.42
+    112,24.50,60.06
+    112,22.87,59.85
+    112,22.29,60.39
+    112,21.32,60.72
+    112,21.54,61.71
+    112,21.06,62.61
+    112,21.54,63.19
+    112,22.44,63.82
+    112,24.73,64.90
+    112,25.40,65.11
+    112,25.29,65.53
+    112,23.90,66.01
+    112,22.18,65.72
+    112,21.21,65.03
+    112,21.37,64.41
+    112,19.78,63.61
+    112,17.85,62.75
+    112,17.12,61.34
+    112,17.83,60.64
+    112,18.79,60.08
+    112,17.87,58.95
+    112,16.83,58.72
+    112,16.45,57.04
+    112,15.88,56.10
+    112,14.67,56.20
+    112,14.10,55.41
+    112,12.94,55.36
+    112,12.63,56.31
+    112,11.79,57.44
+    112,11.03,58.86
+    112,10.36,59.47
+    112,8.38,58.31
+    112,7.05,58.08
+    112,5.67,58.59
+    112,5.31,59.66
+    112,4.99,61.97
+    112,5.91,62.61
+    112,8.55,63.45
+    112,10.53,64.49
+    112,12.36,65.88
+    112,14.76,67.81
+    112,16.44,68.56
+    112,19.18,69.82
+    112,21.38,70.26
+    112,23.02,70.20
+    112,24.55,71.03
+    112,26.37,70.99
+    112,28.17,71.19
+    112,31.29,70.45
+    112,30.01,70.19
+    112,31.10,69.56
+    112,32.13,69.91
+    112,33.78,69.30
+    112,36.51,69.06
+    112,40.29,67.93
+    112,41.06,67.46
+    112,41.13,66.79
+    112,40.02,66.27
+    112,38.38,66.00
+    112,33.92,66.76
+    112,33.18,66.63
+    112,34.81,65.90
+    112,34.94,64.41
+    112,36.23,64.11
+    112,37.01,63.85
+    112,37.14,64.33
+    112,36.52,64.78
+    112,37.18,65.14
+    112,39.59,64.52
+    112,40.44,64.76
+    112,39.76,65.50
+    112,42.09,66.48
+    112,43.02,66.42
+    112,43.95,66.07
+    112,44.53,66.76
+    112,43.70,67.35
+    112,44.19,67.95
+    112,43.45,68.57
+    112,46.25,68.25
+    112,46.82,67.69
+    112,45.56,67.57
+    112,45.56,67.01
+    112,46.35,66.67
+    112,47.89,66.88
+    112,48.14,67.52
+    112,50.23,68.00
+    112,53.72,68.86
+    112,54.47,68.81
+    112,53.49,68.20
+    112,54.73,68.10
+    112,55.44,68.44
+    112,57.32,68.47
+    112,58.80,68.88
+    112,59.94,68.28
+    112,61.08,68.94
+    112,60.03,69.52
+    112,60.55,69.85
+    112,63.50,69.55
+    112,64.89,69.23
+    112,68.51,68.09
+    112,69.18,68.62
+    112,68.16,69.14
+    112,68.14,69.36
+    112,66.93,69.45
+    112,67.26,69.93
+    112,66.72,70.71
+    112,66.69,71.03
+    112,68.54,71.93
+    112,69.20,72.84
+    112,69.94,73.04
+    112,72.59,72.78
+    112,72.80,72.22
+    112,71.85,71.41
+    112,72.47,71.09
+    112,72.79,70.39
+    112,72.56,69.02
+    112,73.67,68.41
+    112,73.24,67.74
+    112,71.28,66.32
+    112,72.42,66.17
+    112,72.82,66.53
+    112,73.92,66.79
+    112,74.19,67.28
+    112,75.05,67.76
+    112,74.47,68.33
+    112,74.94,68.99
+    112,73.84,69.07
+    112,73.60,69.63
+    112,74.40,70.63
+    112,73.10,71.45
+    112,74.89,72.12
+    112,74.66,72.83
+    112,75.16,72.86
+    112,75.68,72.30
+    112,75.29,71.34
+    112,76.36,71.15
+    112,75.90,71.87
+    112,77.58,72.27
+    112,79.65,72.32
+    112,81.50,71.75
+    112,80.61,72.58
+    112,80.51,73.65
+    112,82.25,73.85
+    112,84.66,73.81
+    112,86.82,73.94
+    112,86.01,74.46
+    112,87.17,75.12
+    112,88.32,75.14
+    112,90.26,75.64
+    112,92.90,75.77
+    112,93.23,76.05
+    112,95.86,76.14
+    112,96.68,75.92
+    112,98.92,76.45
+    112,100.76,76.43
+    112,101.04,76.86
+    112,101.99,77.29
+    112,104.35,77.70
+    112,106.07,77.37
+    112,104.71,77.13
+    112,106.97,76.97
+    113,49.11,41.28
+    113,49.62,40.57
+    113,50.08,40.53
+    113,50.39,40.26
+    113,49.57,40.18
+    113,49.40,39.40
+    113,49.22,39.05
+    113,48.86,38.82
+    113,48.88,38.32
+    113,49.20,37.58
+    113,50.15,37.37
+    113,50.84,36.87
+    113,52.26,36.70
+    113,53.83,36.97
+    113,53.92,37.20
+    113,53.74,37.91
+    113,53.88,38.95
+    113,53.10,39.29
+    113,53.36,39.98
+    113,52.69,40.03
+    113,52.92,40.88
+    113,53.86,40.63
+    113,54.74,40.95
+    113,54.01,41.55
+    113,53.72,42.12
+    113,52.92,41.87
+    113,52.81,41.14
+    113,52.50,41.78
+    113,52.45,42.03
+    113,52.69,42.44
+    113,52.50,42.79
+    113,51.34,43.13
+    113,50.89,44.03
+    113,50.34,44.28
+    113,50.31,44.61
+    113,51.28,44.51
+    113,51.32,45.25
+    113,52.17,45.41
+    113,53.04,45.26
+    113,53.22,46.23
+    113,53.04,46.85
+    113,52.04,46.80
+    113,51.19,47.05
+    113,50.03,46.61
+    113,49.10,46.40
+    113,48.65,45.81
+    113,47.68,45.64
+    113,46.68,44.61
+    113,47.59,43.66
+    113,47.49,42.99
+    113,48.58,41.81
+    113,49.11,41.28
+    114,-93.84,77.52
+    114,-94.30,77.49
+    114,-96.17,77.56
+    114,-96.44,77.83
+    114,-94.42,77.82
+    114,-93.72,77.63
+    114,-93.84,77.52
+    115,-110.19,77.70
+    115,-112.05,77.41
+    115,-113.53,77.73
+    115,-112.72,78.05
+    115,-111.26,78.15
+    115,-109.85,78.00
+    115,-110.19,77.70
+    116,24.72,77.85
+    116,22.49,77.44
+    116,20.73,77.68
+    116,21.42,77.94
+    116,20.81,78.25
+    116,22.88,78.45
+    116,23.28,78.08
+    116,24.72,77.85
+    117,-109.66,78.60
+    117,-110.88,78.41
+    117,-112.54,78.41
+    117,-112.53,78.55
+    117,-111.50,78.85
+    117,-110.96,78.80
+    117,-109.66,78.60
+    118,-95.83,78.06
+    118,-97.31,77.85
+    118,-98.12,78.08
+    118,-98.55,78.46
+    118,-98.63,78.87
+    118,-97.34,78.83
+    118,-96.75,78.77
+    118,-95.56,78.42
+    118,-95.83,78.06
+    119,-100.06,78.32
+    119,-99.67,77.91
+    119,-101.30,78.02
+    119,-102.95,78.34
+    119,-105.18,78.38
+    119,-104.21,78.68
+    119,-105.42,78.92
+    119,-105.49,79.30
+    119,-103.53,79.17
+    119,-100.83,78.80
+    119,-100.06,78.32
+    120,105.08,78.31
+    120,99.44,77.92
+    120,101.26,79.23
+    120,102.09,79.35
+    120,102.84,79.28
+    120,105.37,78.71
+    120,105.08,78.31
+    121,18.25,79.70
+    121,21.54,78.96
+    121,19.03,78.56
+    121,18.47,77.83
+    121,17.59,77.64
+    121,17.12,76.81
+    121,15.91,76.77
+    121,13.76,77.38
+    121,14.67,77.74
+    121,13.17,78.02
+    121,11.22,78.87
+    121,10.44,79.65
+    121,13.17,80.01
+    121,13.72,79.66
+    121,15.14,79.67
+    121,15.52,80.02
+    121,16.99,80.05
+    121,18.25,79.70
+    122,25.45,80.41
+    122,27.41,80.06
+    122,25.92,79.52
+    122,23.02,79.40
+    122,20.08,79.57
+    122,19.90,79.84
+    122,18.46,79.86
+    122,17.37,80.32
+    122,20.46,80.60
+    122,21.91,80.36
+    122,22.92,80.66
+    122,25.45,80.41
+    123,51.14,80.55
+    123,49.79,80.42
+    123,48.89,80.34
+    123,48.75,80.18
+    123,47.59,80.01
+    123,46.50,80.25
+    123,47.07,80.56
+    123,44.85,80.59
+    123,46.80,80.77
+    123,48.32,80.78
+    123,48.52,80.51
+    123,49.10,80.75
+    123,50.04,80.92
+    123,51.52,80.70
+    123,51.14,80.55
+    124,99.94,78.88
+    124,97.76,78.76
+    124,94.97,79.04
+    124,93.31,79.43
+    124,92.55,80.14
+    124,91.18,80.34
+    124,93.78,81.02
+    124,95.94,81.25
+    124,97.88,80.75
+    124,100.19,79.78
+    124,99.94,78.88
+    125,-87.02,79.66
+    125,-85.81,79.34
+    125,-87.19,79.04
+    125,-89.04,78.29
+    125,-90.80,78.22
+    125,-92.88,78.34
+    125,-93.95,78.75
+    125,-93.94,79.11
+    125,-93.15,79.38
+    125,-94.97,79.37
+    125,-96.08,79.71
+    125,-96.71,80.16
+    125,-96.02,80.60
+    125,-95.32,80.91
+    125,-94.30,80.98
+    125,-94.74,81.21
+    125,-92.41,81.26
+    125,-91.13,80.72
+    125,-89.45,80.51
+    125,-87.81,80.32
+    125,-87.02,79.66
+    126,-68.50,83.11
+    126,-65.83,83.03
+    126,-63.68,82.90
+    126,-61.85,82.63
+    126,-61.89,82.36
+    126,-64.33,81.93
+    126,-66.75,81.73
+    126,-67.66,81.50
+    126,-65.48,81.51
+    126,-67.84,80.90
+    126,-69.47,80.62
+    126,-71.18,79.80
+    126,-73.24,79.63
+    126,-73.88,79.43
+    126,-76.91,79.32
+    126,-75.53,79.20
+    126,-76.22,79.02
+    126,-75.39,78.53
+    126,-76.34,78.18
+    126,-77.89,77.90
+    126,-78.36,77.51
+    126,-79.76,77.21
+    126,-79.62,76.98
+    126,-77.91,77.02
+    126,-77.89,76.78
+    126,-80.56,76.18
+    126,-83.17,76.45
+    126,-86.11,76.30
+    126,-87.60,76.42
+    126,-89.49,76.47
+    126,-89.62,76.95
+    126,-87.77,77.18
+    126,-88.26,77.90
+    126,-87.65,77.97
+    126,-84.98,77.54
+    126,-86.34,78.18
+    126,-87.96,78.37
+    126,-87.15,78.76
+    126,-85.38,79.00
+    126,-85.09,79.35
+    126,-86.51,79.74
+    126,-86.93,80.25
+    126,-84.20,80.21
+    126,-83.41,80.10
+    126,-81.85,80.46
+    126,-84.10,80.58
+    126,-87.60,80.52
+    126,-89.37,80.86
+    126,-90.20,81.26
+    126,-91.37,81.55
+    126,-91.59,81.89
+    126,-90.10,82.08
+    126,-88.93,82.12
+    126,-86.97,82.28
+    126,-85.50,82.65
+    126,-84.26,82.60
+    126,-83.18,82.32
+    126,-82.42,82.86
+    126,-81.10,83.02
+    126,-79.31,83.13
+    126,-76.25,83.17
+    126,-75.72,83.06
+    126,-72.83,83.23
+    126,-70.67,83.17
+    126,-68.50,83.11
+    127,-27.10,83.52
+    127,-20.85,82.73
+    127,-22.69,82.34
+    127,-26.52,82.30
+    127,-31.90,82.20
+    127,-31.40,82.02
+    127,-27.86,82.13
+    127,-24.84,81.79
+    127,-22.90,82.09
+    127,-22.07,81.73
+    127,-23.17,81.15
+    127,-20.62,81.52
+    127,-15.77,81.91
+    127,-12.77,81.72
+    127,-12.21,81.29
+    127,-16.29,80.58
+    127,-16.85,80.35
+    127,-20.05,80.18
+    127,-17.73,80.13
+    127,-18.90,79.40
+    127,-19.70,78.75
+    127,-19.67,77.64
+    127,-18.47,76.99
+    127,-20.04,76.94
+    127,-21.68,76.63
+    127,-19.83,76.10
+    127,-19.60,75.25
+    127,-20.67,75.16
+    127,-19.37,74.30
+    127,-21.59,74.22
+    127,-20.43,73.82
+    127,-20.76,73.46
+    127,-22.17,73.31
+    127,-23.57,73.31
+    127,-22.31,72.63
+    127,-22.30,72.18
+    127,-24.28,72.60
+    127,-24.79,72.33
+    127,-23.44,72.08
+    127,-22.13,71.47
+    127,-21.75,70.66
+    127,-23.54,70.47
+    127,-24.31,70.86
+    127,-25.54,71.43
+    127,-25.20,70.75
+    127,-26.36,70.23
+    127,-23.73,70.18
+    127,-22.35,70.13
+    127,-25.03,69.26
+    127,-27.75,68.47
+    127,-30.67,68.13
+    127,-31.78,68.12
+    127,-32.81,67.74
+    127,-34.20,66.68
+    127,-36.35,65.98
+    127,-37.04,65.94
+    127,-38.38,65.69
+    127,-39.81,65.46
+    127,-40.67,64.84
+    127,-40.68,64.14
+    127,-41.19,63.48
+    127,-42.82,62.68
+    127,-42.42,61.90
+    127,-42.87,61.07
+    127,-43.38,60.10
+    127,-44.79,60.04
+    127,-46.26,60.85
+    127,-48.26,60.86
+    127,-49.23,61.41
+    127,-49.90,62.38
+    127,-51.63,63.63
+    127,-52.14,64.28
+    127,-52.28,65.18
+    127,-53.66,66.10
+    127,-53.30,66.84
+    127,-53.97,67.19
+    127,-52.98,68.36
+    127,-51.48,68.73
+    127,-51.08,69.15
+    127,-50.87,69.93
+    127,-52.01,69.57
+    127,-52.56,69.43
+    127,-53.46,69.28
+    127,-54.68,69.61
+    127,-54.75,70.29
+    127,-54.36,70.82
+    127,-53.43,70.84
+    127,-51.39,70.57
+    127,-53.11,71.20
+    127,-54.00,71.55
+    127,-55.00,71.41
+    127,-55.83,71.65
+    127,-54.72,72.59
+    127,-55.33,72.96
+    127,-56.12,73.65
+    127,-57.32,74.71
+    127,-58.60,75.10
+    127,-58.59,75.52
+    127,-61.27,76.10
+    127,-63.39,76.18
+    127,-66.06,76.13
+    127,-68.50,76.06
+    127,-69.66,76.38
+    127,-71.40,77.01
+    127,-68.78,77.32
+    127,-66.76,77.38
+    127,-71.04,77.64
+    127,-73.30,78.04
+    127,-73.16,78.43
+    127,-69.37,78.91
+    127,-65.71,79.39
+    127,-65.32,79.76
+    127,-68.02,80.12
+    127,-67.15,80.52
+    127,-63.69,81.21
+    127,-62.23,81.32
+    127,-62.65,81.77
+    127,-60.28,82.03
+    127,-57.21,82.19
+    127,-54.13,82.20
+    127,-53.04,81.89
+    127,-50.39,82.44
+    127,-48.00,82.06
+    127,-46.60,81.99
+    127,-44.52,81.66
+    127,-46.90,82.20
+    127,-46.76,82.63
+    127,-43.41,83.23
+    127,-39.90,83.18
+    127,-38.62,83.55
+    127,-35.09,83.65
+    127,-27.10,83.52
+main.moon.webp: !!binary |
+    UklGRgwNAABXRUJQVlA4WAoAAAAwAAAA/wAA/wAASUNDUMgBAAAAAAHIAAAAAAQw
+    AABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAA
+    AAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAA
+    ABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAA
+    AChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAA
+    AAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZ
+    WiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA
+    9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAA
+    AABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBu
+    AGMALgAgADIAMAAxADZBTFBIoQUAAAmgLW2b4rj55Z1a1UobNrNlVYU5MSpRy8z2
+    LYQZjzhqhfmIObmCHLFhWpUJacMMKjMzM3X//0jTCnxhRYQDSVLjRvJB1itBpRwW
+    8gRq+z/b/o+2/6Pt/2jxaPs/lEI/TBk+UGLA0tEDFCr025SI4BvusAD2pUuXKgU9
+    BR8/742N2hgT4j56LRl18cjjqRISacjbbn3l1jd3DjrrvB8mkzKGIB9L133901o6
+    +ax+UcRxKMTLD65bVq/TyePO6hcQGQ15+b7d2+r1nd0nnzUwGzDdKRFccNe+nfUv
+    65Q/OdcvG5CxKQgxeIh21uvU/+ST+wq6K8bggruJYvS+x1rAFaV4je2HiAQ9f44E
+    8G6za7c14vT8cZlsEAghBuvTOhB0aWSygRNiuD7jxs7+5+SPy9gUJOlYQWmsFfTu
+    jkw2HVk6YLBBDs4fl84IKbbVGFIJZkPmYElnT7Ias2qMUYLFIpmD5dbkgFhBFro3
+    EOOihvS1/c9hgKVYUYkbE5A+E9EzPRGR1ibUIMFm9Hz/mCelK1orm4IQgk2Atd1M
+    p45Mz0MRaUMqhAdyKyK3blSNCYOlWClTVVrDa0XiRoNqzOVgSf+8J9JGE3uCtygB
+    XWzNKcg1JuIRPp9N6SIH2xBECgom2gzEnQk+MEEOdltLIxtoo20Ohgg2F2JnSE8z
+    7jMVDa8VSULnHCyB6LGej+5H14o40IcupHjGfQqeBCekC0PSP3etGUKfSYRY1KNu
+    ObdmUxU2n0kD4mosbnzk6CDBBE2JbcscPV6PYQSbluSyKSlQgahjygwLgJNgjxz8
+    JUVUoCjqyGTTASoJFouS52DKM71wG1HHxHunBrgWedLXfhlFtxUK0cMfcQqC5dOP
+    fs6tg590W3MU79w71QKYQL+woqcW31nZny8XbivMjDreyVgDkk+/sPbXHn++88jC
+    lS/WToiihwrFKc4ToFbEE9yxcfF8uuTGUV0nDUsTRVTkFASoFfEDN+5b/Pz8kZNP
+    PfDDyh86O6PbCkKK4fj0OzbtoMXz59Pk3P50794DX6x1brtzoktBcHx6soho8Xy6
+    6qoc0UUzZuRenFiIV+UKJLh6HxvPP0+Tc7VaLZ1+cWX5zXIxk80GSoEEN+2wO8Xo
+    k3NEo6746ooXFw/o6so8FillH8GQYH+WoM9n+tM1Ikr17j191vGf90RK45Bgb1ac
+    bgkcwKhR9NVXvQf2Pf6p2sQQhwR7shoYi3OTc1SrjRp13es/LN6w4c0FFKoQhU9v
+    VmP6dRe+fv0oFwe7VaH1AcOnH6uxcf311zcJKwwVCrAFLPH8h+mNoorRQw0D9GLF
+    z9eThVXWICTY+fRixc+kB4461Jd1nY0q8aGA1KE+rH2jRnkEHCLpRn1a0eu8AtYI
+    u9EC3z0g0Y6Da0Vut+G24IajFUl4odZMHK1IwrMVH5H5DKhFE5jPMd6jSekBqxUB
+    DP5KBxgJ/nUMLBLcQtDAk+CHW3fi8hnB9/m+56g4n9BA/uj52SAEH/K7I5TgQw9/
+    1II7ukX3e5wlkD7fuz85BrMKu3tawlEyOCX4XfsVJ0FTkE6fDFNpfuo/4i/X/y8E
+    5fUngk5ZQiOkkvqDPv17CKVIeRFSpQrPUkoLC9GNlOarpSYHNE8E+cbjayVDRpFW
+    PP07LUwftTFkjKGyKrttIS+1lpglqhKFRGWjlAb9AtrUyjtVlWIA9P8OukTGKBLb
+    aA3vkY/QlEyRqFgsE+djjflHWNGmVKnInyO/j4CzkMOtHomdlCFdlHKEWJedIvOj
+    atkmIhZlTs0KsiK5fGxTkQhBvIGYFclUDRWJa5My/wK5TsVrUMmwGFdJkSkaRe6K
+    +AUUTRi7sRUKtyuYl9pUzEpslFYkahNXmtg3ELIiaU3VaiwEW5rArlGJc5HhdxH2
+    ZAbzxEROBX5p+z/b/o+2/+PfmKPt/yAAVlA4IHQFAABwKgCdASoAAQABPmEwlUgk
+    IqIhIbTo8IAMCWlu40M8ru5UJv9Vt+c8zpme87/8rAQO2X/LfjXlzmlJyMt/jN79
+    H6Z/m+hIzaPWHsCdHn90vZS/aUPVcWq4aZ8MxUFTm13AepioKnNruA9TFQVObXcB
+    6mKgqc2u4D1MTEA7KN/Cor69Rmog09p0GvXRyVBU5tbOcs5fK2zJWm5fxmKOBVSB
+    NzLdwmv+nUOwc2u4D1e7SaKfSt4TS/YwP1RoIfrm2w7DRus9KzG7mGXXhnb82u4D
+    0QaNjrP1Mr3aaKOfUOIXLswyswhsl6mbj3wqtPrUVAv9PioKnNrYUhUdYxXkQxDr
+    YHraA1KtlpB4ZVdjODinC53Aepim8nXyZZ2i2eeMlyO72O/J0coyoX3BNqZ8MxUC
+    hw5v+dJMzQMp6brM0Xycgqc2uxwdruA9TFQVObXcB6mKgqc2u4D1MVBU5lAA/v/E
+    /gAACZ+Mbt/HSxWgDR1xzBGT7fUl+XAZmLtmxjVTwlOL1ci7ygjaAyAZruDpAHqK
+    lAe6DmTzP4FOJapy8ue9dDH9FbWqbMEbg3R7oMnQR8YHCNDXx4cHfqPAAn3jTns5
+    wbMmMLdJccgp4BFtudmVYkFXRzavAE+QlCE2l2FROAFARMcORKP0CI8GDcDJdhG6
+    gogyQk5iCovWwDo4R2QBuPB2yFg+BzerGJJeLpV/OVFzT1SfkpNWxYSR2P1ViXHb
+    iucqDF2v1XK3CZq4Ofi56tGUYl+1OuhNIqSKY7bAC9h7urSc2Uc5XiBRWMaBCf3J
+    RHbT7B9GJzJi4Q9Knt04bM9rosG6nhAvCF0nGxX5DePxeiniSP62a5hesm4oaanY
+    4aPK/wOOXfwa0VltB2EkGbFYM9VhlYHjUVumMSI5c7gIAvfMxelg3duX0QipbjcA
+    BQoPmeh4jnZDnVNYSZCzWerVds9cafZlZEBuL54O5YgpVMGyAfpkdIIirz2eJ4Ge
+    UnByGOh3upliERAnXFf+QsNbW6SIxKhS7cfpyzzit9r2mzfAIiHrcEY10vOQol6X
+    FpyIxYfE6psS+Yedmq4Xrweu27htLfxznsynWeJzwezp9rBar+ocrTalor/wpKi0
+    lDMkZn5SFk0hBTB8K+dtidL0LcjsWO0N2JJ+ZmO8iM+TqK7QpFCR02ooryvM/lUr
+    9Iqa5XjzdZD8kIHWe+LnLNKMvB47dnuBxvSr7lVKWn37C9DhWxUMK5VDHl+zBgZs
+    PYRsUUgSjG/dFFFTAEljHYfJ1f3AIsQXcMj8zWXyVpvQlkYnZqSdbzmcYIfVwenn
+    5gRfe2d2K+Se+4zJEzT/smc3Gg+kwEBa7DjneiaA4eNzoeg0b+ixI0HKTUFDrn3I
+    ZMzdk5YDgOawPuuWxwEkqhQRjXQvxpMACW14JnIJ7dVyU8H9DzbFE4gdSH4Z95JK
+    n0e31XEviXkTtPqnHQ3VeNGnXYTjifT0SZistwC9M0EI8GRnYN9ssfrBgOacDeDx
+    Xw0Uc4qeQ/sTJe6xYlSlw7JDklzg9vRrr0BAqcK1KsAO9tADBdtocSfoITAPi8um
+    l5vlxAj3/4lyMzKIXesQWb8S4vijttuX3ZUf0KLi9rync93iuyoMVXY87yXcKatO
+    /OUH0gpkpFPdZPzGhlVl/+etqMW2RyYXAJ2sG8hSkaL95i/8L4nBy+RV1AW5mqMY
+    MSXHoXXRMq/o1QjpOajnTPcrhwNEZRuJ+wnTFKd5f6772ZdCh6Lca71qCCOUaVVd
+    LbCx5bYY8OuyeAxYFH/sV4e7j7yiJO4kqFXcVplxSZGDBwMQgaK6Ps4qALrekxhe
+    6zVP/TOvnv0Nf/3tQUu4EJNWH3tf9pC6IvO31DTHNsAAAAAA
