@@ -12,82 +12,544 @@ main.moon: |
             default: [0.025, 0.46, 0.16, 1]
             kind: color
     assets:
+        body:
+            use:
+                import: ./components/body.moon
+            with:
+                body_color:
+                    param: body_color
+                green:
+                    param: green
+        cab:
+            use:
+                import: ./components/cab.moon
+            with:
+                body_color:
+                    param: body_color
+                green:
+                    param: green
+        sides:
+            use:
+                import: ./components/sides.moon
+            with:
+                body_color:
+                    param: body_color
+                green:
+                    param: green
+        bogies:
+            use:
+                import: ./components/bogies.moon
+            with:
+                body_color:
+                    param: body_color
+                green:
+                    param: green
+        equipment:
+            use:
+                import: ./components/equipment.moon
+            with:
+                body_color:
+                    param: body_color
+                green:
+                    param: green
+        hvac:
+            use:
+                import: ./components/hvac.moon
+            with:
+                body_color:
+                    param: body_color
+                green:
+                    param: green
+        ends:
+            use:
+                import: ./components/ends.moon
+            with:
+                body_color:
+                    param: body_color
+                green:
+                    param: green
+    render:
+        group:
+          - asset: body
+          - asset: cab
+          - asset: sides
+          - asset: bogies
+          - asset: equipment
+          - asset: hvac
+          - asset: ends
+components/body.moon: |
+    moon: "1.0"
+    doc: |
+        Hollow stainless body with shared aperture cutters and structural layers.
+    params:
+        body_color:
+            default: [0.49, 0.53, 0.52, 1]
+            kind: color
+        green:
+            default: [0.025, 0.46, 0.16, 1]
+            kind: color
+    assets:
+        silver:
+            op: Material
+            with:
+                color:
+                    param: body_color
+                metallic: 0.65
+                roughness: 0.48
+        trim:
+            op: Material
+            with:
+                color: [0.64,0.68,0.66,1]
+                metallic: 0.7
+                roughness: 0.4
+        white:
+            op: Material
+            with:
+                color: [0.84,0.87,0.85,1]
+                roughness: 0.36
+        green:
+            op: Material
+            with:
+                color:
+                    param: green
+                roughness: 0.42
+        dark:
+            op: Material
+            with:
+                color: [0.024,0.033,0.032,1]
+                roughness: 0.72
+        rubber:
+            op: Material
+            with:
+                color: [0.012,0.016,0.016,1]
+                roughness: 0.85
+        glass:
+            op: Material
+            with:
+                color: [0.035,0.065,0.065,1]
+                metallic: 0.28
+                roughness: 0.19
+        frontGlass:
+            op: Material
+            with:
+                color: [0.012,0.023,0.023,1]
+                metallic: 0.18
+                roughness: 0.14
+        red:
+            op: Material
+            with:
+                color: [0.85,0.015,0.008,1]
+                emissive: [1,0.025,0.01]
+                emissiveStrength: 2
+                roughness: 0.25
+        lamp:
+            op: Material
+            with:
+                color: [0.9,0.88,0.58,1]
+                emissive: [0.8,0.78,0.35]
+                emissiveStrength: 0.5
+        wheelSteel:
+            op: Material
+            with:
+                color: [0.19,0.21,0.21,1]
+                metallic: 0.88
+                roughness: 0.38
+        frameSteel:
+            op: Material
+            with:
+                color: [0.08,0.095,0.09,1]
+                metallic: 0.6
+                roughness: 0.64
+        roundedBox:
+            import: ./rounded-box.moon
         lettering:
-            doc: |
-                Extruded lettering positioned on the train.
-            params:
-                text: "2514"
-                size: 0.18
-                position: [0, 0, 0]
-                rotation: [-90, 0, 0]
-                color: [0.85, 0.88, 0.83, 1]
-            render:
-                op: Transform
+            import: ./lettering.moon
+        doorCutters:
+            op: Place
+            with:
+                positions: [[0, 2.16, 6.9], [0, 2.16, 2.5], [0, 2.16, -1.9], [0, 2.16, -6.3]]
+            input:
+                op: RoundedBox
                 with:
-                    translate:
-                        param: position
-                    rotate:
-                        param: rotation
-                    scale: [1, 1, -1]
+                    size: [3.5, 2.2, 1.52]
+                    radius: 0.045
+                    resolution: 12
+        windowCutters:
+            op: Place
+            with:
+                positions: [[0, 2.5, 4.7], [0, 2.5, 0.3], [0, 2.5, -4.1]]
+            input:
+                op: RoundedBox
+                with:
+                    size: [3.5, 1.2, 2.17]
+                    radius: 0.075
+                    resolution: 12
+        endWindowCutter:
+            op: Transform
+            with:
+                translate: [0, 2.5, -8.35]
+            input:
+                op: RoundedBox
+                with:
+                    size: [3.5, 1.2, 1.5]
+                    radius: 0.075
+                    resolution: 12
+        outerShell:
+            op: Transform
+            with:
+                translate: [0, 2.31, 0]
+            input:
+                op: RoundedBox
+                with:
+                    size: [3.04, 2.83, 19.3]
+                    radius: 0.17
+                    resolution: 16
+        interior:
+            op: Transform
+            with:
+                translate: [0, 2.31, 0]
+            input:
+                op: Box
+                with:
+                    size: [2.8, 2.56, 19.04]
+        shell:
+            op: ApplyMaterial
+            with:
+                material:
+                    asset: silver
+            input:
+                op: Difference
                 input:
-                    op: ApplyMaterial
-                    with:
-                        material:
-                            op: Material
-                            with:
-                                color:
-                                    param: color
-                                roughness: 0.6
-                    input:
-                        op: Extrude
-                        with:
-                            height: 0.002
-                        input:
-                            op: Text
-                            with:
-                                text:
-                                    param: text
-                                fontSize:
-                                    param: size
-                                alignX: center
-                                alignY: center
+                    items:
+                      - asset: outerShell
+                      - asset: interior
+                      - asset: doorCutters
+                      - asset: windowCutters
+                      - asset: endWindowCutter
+        roof:
+            pipe:
+              - use:
+                    asset: roundedBox
+                with:
+                    size: [3.02,0.44,19.15]
+                    radius: 0.2
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: silver
+              - op: Transform
+                with:
+                    translate: [0,3.72,-0.05]
+        roofInset:
+            pipe:
+              - use:
+                    asset: roundedBox
+                with:
+                    size: [2.87,0.12,18.8]
+                    radius: 0.04
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: dark
+              - op: Transform
+                with:
+                    translate: [0,3.94,-0.12]
+        sill:
+            pipe:
+              - use:
+                    asset: roundedBox
+                with:
+                    size: [2.9,0.22,18.9]
+                    radius: 0.04
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: trim
+              - op: Transform
+                with:
+                    translate: [0,0.91,-0.05]
+        underframe:
+            pipe:
+              - use:
+                    asset: roundedBox
+                with:
+                    size: [2.4,0.3,18.4]
+                    radius: 0.06
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: dark
+              - op: Transform
+                with:
+                    translate: [0,0.71,-0.1]
+    render:
+        group:
+          - asset: shell
+          - asset: roof
+          - asset: roofInset
+          - asset: sill
+          - asset: underframe
+components/bogies.moon: |
+    moon: "1.0"
+    doc: |
+        A shared detailed bogie placed at both wheelbase centers.
+    params:
+        body_color:
+            default: [0.49, 0.53, 0.52, 1]
+            kind: color
+        green:
+            default: [0.025, 0.46, 0.16, 1]
+            kind: color
+    assets:
+        silver:
+            op: Material
+            with:
+                color:
+                    param: body_color
+                metallic: 0.65
+                roughness: 0.48
+        trim:
+            op: Material
+            with:
+                color: [0.64,0.68,0.66,1]
+                metallic: 0.7
+                roughness: 0.4
+        white:
+            op: Material
+            with:
+                color: [0.84,0.87,0.85,1]
+                roughness: 0.36
+        green:
+            op: Material
+            with:
+                color:
+                    param: green
+                roughness: 0.42
+        dark:
+            op: Material
+            with:
+                color: [0.024,0.033,0.032,1]
+                roughness: 0.72
+        rubber:
+            op: Material
+            with:
+                color: [0.012,0.016,0.016,1]
+                roughness: 0.85
+        glass:
+            op: Material
+            with:
+                color: [0.035,0.065,0.065,1]
+                metallic: 0.28
+                roughness: 0.19
+        frontGlass:
+            op: Material
+            with:
+                color: [0.012,0.023,0.023,1]
+                metallic: 0.18
+                roughness: 0.14
+        red:
+            op: Material
+            with:
+                color: [0.85,0.015,0.008,1]
+                emissive: [1,0.025,0.01]
+                emissiveStrength: 2
+                roughness: 0.25
+        lamp:
+            op: Material
+            with:
+                color: [0.9,0.88,0.58,1]
+                emissive: [0.8,0.78,0.35]
+                emissiveStrength: 0.5
+        wheelSteel:
+            op: Material
+            with:
+                color: [0.19,0.21,0.21,1]
+                metallic: 0.88
+                roughness: 0.38
+        frameSteel:
+            op: Material
+            with:
+                color: [0.08,0.095,0.09,1]
+                metallic: 0.6
+                roughness: 0.64
+        roundedBox:
+            import: ./rounded-box.moon
+        lettering:
+            import: ./lettering.moon
+        assembly:
+            expression: |
+                const silver = assets.silver
+                const trim = assets.trim
+                const dark = assets.dark
+                const rubber = assets.rubber
+                const wheelSteel = assets.wheelSteel
+                const frameSteel = assets.frameSteel
+                const parts = []
+                const add = (geo,mat,pos=[0,0,0],rot=[0,0,0]) => parts.push(Transform({input:ApplyMaterial({input:geo,material:mat}),translate:pos,rotate:rot}))
+                const box = (size,pos,mat,r=0) => add(r ? assets.roundedBox({size,radius:r}) : Box({size}),mat,pos)
+                const cyl = (r,h,pos,mat,rot=[0,0,0]) => add(Cylinder({radiusLow:r,height:h,resolution:32}),mat,pos,rot)
+                const label = (text,size,position,rotation=[-90,0,0],color=[0.85,0.88,0.83,1]) => parts.push(assets.lettering({text,size,position,rotation,color}))
+                const tube = (path,r,mat) => add(Sweep({input:Circle({radius:r,resolution:10}),path}),mat)
+                const ring = (outer,inner,depth,pos,mat,rot=[0,0,0]) => add(Extrude({input:Difference([outer,inner]),height:depth}),mat,pos,rot)
+                const wheel = Revolve({input:Polygon({points:[
+                    [0,-0.105],[0.14,-0.105],[0.17,-0.054],[0.32,-0.052],
+                    [0.36,-0.105],[0.445,-0.105],[0.445,-0.077],[0.417,-0.057],
+                    [0.413,0.080],[0.37,0.094],[0.335,0.042],[0.18,0.042],
+                    [0.145,0.109],[0,0.109]
+                ]}),resolution:64})
+                {
+                    const z = 0
+                    for(const dz of [-0.43,0.43]) box([2.36,0.19,0.18],[0,0.65,z+dz],frameSteel,0.026)
+                    box([0.86,0.24,0.68],[0,0.73,z],frameSteel,0.045)
+                    for(const dz of [-1.01,1.01]) {
+                        cyl(0.082,2.38,[0,0.445,z+dz],wheelSteel,[0,0,90])
+                        cyl(0.22,0.66,[0,0.57,z+dz*0.75],frameSteel,[0,0,90])
+                        for(const side of [-1,1]) {
+                            add(wheel,wheelSteel,[side*0.85,0.445,z+dz],[0,0,-side*90])
+                            cyl(0.145,0.095,[side*1.075,0.445,z+dz],frameSteel,[0,0,90])
+                            box([0.21,0.23,0.29],[side*1.16,0.445,z+dz],frameSteel,0.035)
+                            cyl(0.091,0.018,[side*1.276,0.445,z+dz],silver,[0,0,90])
+                            for(let k=0;k<6;k++) {
+                                const a=k*Math.PI/3
+                                cyl(0.014,0.024,[side*1.293,0.445+0.068*Math.cos(a),z+dz+0.068*Math.sin(a)],dark,[0,0,90])
+                            }
+                            box([0.14,0.24,0.19],[side*0.91,0.45,z+dz+0.35],frameSteel,0.025)
+                            tube([[side*1.14,0.66,z+dz],[side*1.15,0.64,z+dz+0.27],[side*0.98,0.52,z+dz+0.34]],0.016,dark)
+                        }
+                    }
+                    for(const side of [-1,1]) {
+                        tube([[side*1.12,0.55,z-1.26],[side*1.12,0.71,z-0.72],[side*1.12,0.72,z+0.72],[side*1.12,0.55,z+1.26]],0.095,frameSteel)
+                        cyl(0.27,0.055,[side*1.05,0.87,z],silver)
+                        cyl(0.245,0.15,[side*1.05,0.78,z],rubber)
+                        for(const y of [0.745,0.8,0.845]) cyl(0.253,0.018,[side*1.05,y,z],dark)
+                        for(const dz of [-0.76,0.76]) {
+                            const spring = []
+                            for(let k=0;k<=64;k++) {
+                                const a=k/64*Math.PI*10
+                                spring.push([side*1.16+0.087*Math.cos(a),0.53+k/64*0.20,z+dz+0.087*Math.sin(a)])
+                            }
+                            tube(spring,0.016,wheelSteel)
+                            cyl(0.116,0.025,[side*1.16,0.52,z+dz],frameSteel)
+                            cyl(0.116,0.025,[side*1.16,0.745,z+dz],frameSteel)
+                        }
+                        tube([[side*1.29,0.47,z-0.54],[side*1.29,0.77,z-0.23]],0.033,frameSteel)
+                        tube([[side*1.29,0.68,z-0.32],[side*1.29,0.9,z-0.08]],0.018,trim)
+                    }
+                }
+                return Group(parts)
+            produces: MESHES
+    render:
+        op: Place
+        with:
+            positions: [[0,0,-6.55],[0,0,6.1]]
+        input:
+            asset: assembly
+components/cab.moon: |
+    moon: "1.0"
+    doc: |
+        Curved cab mask, glazing, lamps, lettering and coupler.
+    params:
+        body_color:
+            default: [0.49, 0.53, 0.52, 1]
+            kind: color
+        green:
+            default: [0.025, 0.46, 0.16, 1]
+            kind: color
+    assets:
+        silver:
+            op: Material
+            with:
+                color:
+                    param: body_color
+                metallic: 0.65
+                roughness: 0.48
+        trim:
+            op: Material
+            with:
+                color: [0.64,0.68,0.66,1]
+                metallic: 0.7
+                roughness: 0.4
+        white:
+            op: Material
+            with:
+                color: [0.84,0.87,0.85,1]
+                roughness: 0.36
+        green:
+            op: Material
+            with:
+                color:
+                    param: green
+                roughness: 0.42
+        dark:
+            op: Material
+            with:
+                color: [0.024,0.033,0.032,1]
+                roughness: 0.72
+        rubber:
+            op: Material
+            with:
+                color: [0.012,0.016,0.016,1]
+                roughness: 0.85
+        glass:
+            op: Material
+            with:
+                color: [0.035,0.065,0.065,1]
+                metallic: 0.28
+                roughness: 0.19
+        frontGlass:
+            op: Material
+            with:
+                color: [0.012,0.023,0.023,1]
+                metallic: 0.18
+                roughness: 0.14
+        red:
+            op: Material
+            with:
+                color: [0.85,0.015,0.008,1]
+                emissive: [1,0.025,0.01]
+                emissiveStrength: 2
+                roughness: 0.25
+        lamp:
+            op: Material
+            with:
+                color: [0.9,0.88,0.58,1]
+                emissive: [0.8,0.78,0.35]
+                emissiveStrength: 0.5
+        wheelSteel:
+            op: Material
+            with:
+                color: [0.19,0.21,0.21,1]
+                metallic: 0.88
+                roughness: 0.38
+        frameSteel:
+            op: Material
+            with:
+                color: [0.08,0.095,0.09,1]
+                metallic: 0.6
+                roughness: 0.64
+        roundedBox:
+            import: ./rounded-box.moon
+        lettering:
+            import: ./lettering.moon
     render:
         expression: |
-            const silver = Material({color:params.body_color,metallic:0.65,roughness:0.48})
-            const trim = Material({color:[0.64,0.68,0.66,1],metallic:0.7,roughness:0.4})
-            const white = Material({color:[0.84,0.87,0.85,1],roughness:0.36})
-            const green = Material({color:params.green,roughness:0.42})
-            const dark = Material({color:[0.024,0.033,0.032,1],roughness:0.72})
-            const rubber = Material({color:[0.012,0.016,0.016,1],roughness:0.85})
-            const glass = Material({color:[0.035,0.065,0.065,1],metallic:0.28,roughness:0.19})
-            const frontGlass = Material({color:[0.012,0.023,0.023,1],metallic:0.18,roughness:0.14})
-            const red = Material({color:[0.85,0.015,0.008,1],emissive:[1,0.025,0.01],emissiveStrength:2,roughness:0.25})
-            const lamp = Material({color:[0.9,0.88,0.58,1],emissive:[0.8,0.78,0.35],emissiveStrength:0.5})
+            const silver = assets.silver
+            const trim = assets.trim
+            const white = assets.white
+            const green = assets.green
+            const dark = assets.dark
+            const rubber = assets.rubber
+            const glass = assets.glass
+            const frontGlass = assets.frontGlass
+            const red = assets.red
+            const lamp = assets.lamp
             const parts = []
             const add = (geo,mat,pos=[0,0,0],rot=[0,0,0]) => parts.push(Transform({input:ApplyMaterial({input:geo,material:mat}),translate:pos,rotate:rot}))
-            const box = (size,pos,mat,r=0) => add(r ? RoundedBox({size,radius:r,resolution:12}) : Box({size}),mat,pos)
+            const box = (size,pos,mat,r=0) => add(r ? assets.roundedBox({size,radius:r}) : Box({size}),mat,pos)
             const cyl = (r,h,pos,mat,rot=[0,0,0]) => add(Cylinder({radiusLow:r,height:h,resolution:32}),mat,pos,rot)
             const label = (text,size,position,rotation=[-90,0,0],color=[0.85,0.88,0.83,1]) => parts.push(assets.lettering({text,size,position,rotation,color}))
             const tube = (path,r,mat) => add(Sweep({input:Circle({radius:r,resolution:10}),path}),mat)
             const ring = (outer,inner,depth,pos,mat,rot=[0,0,0]) => add(Extrude({input:Difference([outer,inner]),height:depth}),mat,pos,rot)
-            // Hollow stainless shell with actual door and window apertures.
-            const openings = []
-            for(const z of [6.9,2.5,-1.9,-6.3]) openings.push(Transform({
-                input:RoundedBox({size:[3.5,2.2,1.52],radius:0.045,resolution:12}),translate:[0,2.16,z]
-            }))
-            for(const z of [4.7,0.3,-4.1,-8.35]) openings.push(Transform({
-                input:RoundedBox({size:[3.5,1.2,z < -8 ? 1.5 : 2.17],radius:0.075,resolution:12}),translate:[0,2.5,z]
-            }))
-            const shell = Difference([
-                Transform({input:RoundedBox({size:[3.04,2.83,19.3],radius:0.17,resolution:16}),translate:[0,2.31,0]}),
-                Transform({input:Box({size:[2.8,2.56,19.04]}),translate:[0,2.31,0]}),
-                ...openings
-            ])
-            add(shell,silver)
-            box([3.02,0.44,19.15],[0,3.72,-0.05],silver,0.2)
-            box([2.87,0.12,18.8],[0,3.94,-0.12],dark,0.04)
-            box([2.9,0.22,18.9],[0,0.91,-0.05],trim,0.04)
-            box([2.4,0.3,18.4],[0,0.71,-0.1],dark,0.06)
             // Arched cab mask, curved glazing and sloping lower skirt.
             const cabStart = parts.length
             box([3.09,3.13,1.13],[0,2.37,9.2],green,0.24)
@@ -132,21 +594,586 @@ main.moon: |
             // Circular green metro emblem on the white cab pillar.
             cyl(0.126,0.016,[1.32,3.28,9.971],green,[90,0,0])
             for(const y of [3.235,3.295]) box([0.255,0.027,0.018],[1.32,y,9.985],white)
-            // Bow the front surface across its width; rake the skirt beneath the cab.
+            // Vectorized bend and inverse-transpose normals retain sharp panel rims.
+            const bendVertices = vertices => {
+                const [x,y,z] = Split({input:vertices,axis:1})
+                return StackAxis({input:[x,y,z-0.035*x*x-0.16*Maximum({input:1.25-y,other:0})],axis:1})
+            }
+            const bendNormals = (vertices,normals) => {
+                const [x,y] = Split({input:vertices,axis:1})
+                const [nx,ny,nz] = Split({input:normals,axis:1})
+                const bent = StackAxis({input:[nx+0.07*x*nz,ny-0.16*(1-Step({input:y,edge:1.25}))*nz,nz],axis:1})
+                return bent / Reshape({input:Norm({input:bent,axis:1}),newShape:[normals.length,1]})
+            }
             for(let i=cabStart;i<parts.length;i++) {
                 parts[i] = Group(parts[i].meshes.map(m => Mesh({
-                    vertices:m.vertices.map(v => [v[0],v[1],v[2]-0.035*v[0]*v[0]-0.16*Math.max(0,1.25-v[1])]),
-                    // Inverse-transpose of the bend: retain hard rim normals and smooth face reflections.
-                    normals:m.normals.map((n,j) => {
-                        const v=m.vertices[j]
-                        const nx=n[0]+0.07*v[0]*n[2]
-                        const ny=n[1]-(v[1]<1.25 ? 0.16*n[2] : 0)
-                        const length=Math.hypot(nx,ny,n[2])
-                        return [nx/length,ny/length,n[2]/length]
-                    }),
-                    triangles:m.triangles,material:m.material
+                    ...m,
+                    vertices: bendVertices(m.vertices),
+                    normals: bendNormals(m.vertices,m.normals)
                 })))
             }
+            return Group(parts)
+        produces: MESHES
+components/ends.moon: |
+    moon: "1.0"
+    doc: |
+        Roof rails, antenna and trailing end diaphragm.
+    params:
+        body_color:
+            default: [0.49, 0.53, 0.52, 1]
+            kind: color
+        green:
+            default: [0.025, 0.46, 0.16, 1]
+            kind: color
+    assets:
+        silver:
+            op: Material
+            with:
+                color:
+                    param: body_color
+                metallic: 0.65
+                roughness: 0.48
+        trim:
+            op: Material
+            with:
+                color: [0.64,0.68,0.66,1]
+                metallic: 0.7
+                roughness: 0.4
+        white:
+            op: Material
+            with:
+                color: [0.84,0.87,0.85,1]
+                roughness: 0.36
+        green:
+            op: Material
+            with:
+                color:
+                    param: green
+                roughness: 0.42
+        dark:
+            op: Material
+            with:
+                color: [0.024,0.033,0.032,1]
+                roughness: 0.72
+        rubber:
+            op: Material
+            with:
+                color: [0.012,0.016,0.016,1]
+                roughness: 0.85
+        glass:
+            op: Material
+            with:
+                color: [0.035,0.065,0.065,1]
+                metallic: 0.28
+                roughness: 0.19
+        frontGlass:
+            op: Material
+            with:
+                color: [0.012,0.023,0.023,1]
+                metallic: 0.18
+                roughness: 0.14
+        red:
+            op: Material
+            with:
+                color: [0.85,0.015,0.008,1]
+                emissive: [1,0.025,0.01]
+                emissiveStrength: 2
+                roughness: 0.25
+        lamp:
+            op: Material
+            with:
+                color: [0.9,0.88,0.58,1]
+                emissive: [0.8,0.78,0.35]
+                emissiveStrength: 0.5
+        wheelSteel:
+            op: Material
+            with:
+                color: [0.19,0.21,0.21,1]
+                metallic: 0.88
+                roughness: 0.38
+        frameSteel:
+            op: Material
+            with:
+                color: [0.08,0.095,0.09,1]
+                metallic: 0.6
+                roughness: 0.64
+        roundedBox:
+            import: ./rounded-box.moon
+        lettering:
+            import: ./lettering.moon
+    render:
+        expression: |
+            const silver = assets.silver
+            const trim = assets.trim
+            const white = assets.white
+            const dark = assets.dark
+            const rubber = assets.rubber
+            const glass = assets.glass
+            const parts = []
+            const add = (geo,mat,pos=[0,0,0],rot=[0,0,0]) => parts.push(Transform({input:ApplyMaterial({input:geo,material:mat}),translate:pos,rotate:rot}))
+            const box = (size,pos,mat,r=0) => add(r ? assets.roundedBox({size,radius:r}) : Box({size}),mat,pos)
+            const cyl = (r,h,pos,mat,rot=[0,0,0]) => add(Cylinder({radiusLow:r,height:h,resolution:32}),mat,pos,rot)
+            const label = (text,size,position,rotation=[-90,0,0],color=[0.85,0.88,0.83,1]) => parts.push(assets.lettering({text,size,position,rotation,color}))
+            const tube = (path,r,mat) => add(Sweep({input:Circle({radius:r,resolution:10}),path}),mat)
+            const ring = (outer,inner,depth,pos,mat,rot=[0,0,0]) => add(Extrude({input:Difference([outer,inner]),height:depth}),mat,pos,rot)
+            for(const x of [-1.24,-0.97,0.97,1.24]) box([0.028,0.025,17.9],[x,3.954,-0.15],silver)
+            cyl(0.031,0.32,[0,4.08,-8.47],trim)
+            cyl(0.072,0.055,[0,4.265,-8.47],white)
+            // Flat trailing end with diaphragm, emergency door and coupling.
+            box([1.4,2.54,0.18],[0,2.05,-9.71],rubber,0.13)
+            box([0.99,2.19,0.19],[0,2.13,-9.81],silver,0.06)
+            box([0.67,0.89,0.025],[0,2.57,-9.917],glass,0.06)
+            for(let i=0;i<6;i++) {
+                box([0.08,2.35,0.037],[-0.66,2.06,-9.72-i*0.035],dark)
+                box([0.08,2.35,0.037],[0.66,2.06,-9.72-i*0.035],dark)
+            }
+            box([0.36,0.29,0.68],[0,0.64,-9.93],dark,0.04)
+            return Group(parts)
+        produces: MESHES
+components/equipment.moon: |
+    moon: "1.0"
+    doc: |
+        Underfloor equipment cabinets, reservoirs and brake piping.
+    params:
+        body_color:
+            default: [0.49, 0.53, 0.52, 1]
+            kind: color
+        green:
+            default: [0.025, 0.46, 0.16, 1]
+            kind: color
+    assets:
+        silver:
+            op: Material
+            with:
+                color:
+                    param: body_color
+                metallic: 0.65
+                roughness: 0.48
+        trim:
+            op: Material
+            with:
+                color: [0.64,0.68,0.66,1]
+                metallic: 0.7
+                roughness: 0.4
+        white:
+            op: Material
+            with:
+                color: [0.84,0.87,0.85,1]
+                roughness: 0.36
+        green:
+            op: Material
+            with:
+                color:
+                    param: green
+                roughness: 0.42
+        dark:
+            op: Material
+            with:
+                color: [0.024,0.033,0.032,1]
+                roughness: 0.72
+        rubber:
+            op: Material
+            with:
+                color: [0.012,0.016,0.016,1]
+                roughness: 0.85
+        glass:
+            op: Material
+            with:
+                color: [0.035,0.065,0.065,1]
+                metallic: 0.28
+                roughness: 0.19
+        frontGlass:
+            op: Material
+            with:
+                color: [0.012,0.023,0.023,1]
+                metallic: 0.18
+                roughness: 0.14
+        red:
+            op: Material
+            with:
+                color: [0.85,0.015,0.008,1]
+                emissive: [1,0.025,0.01]
+                emissiveStrength: 2
+                roughness: 0.25
+        lamp:
+            op: Material
+            with:
+                color: [0.9,0.88,0.58,1]
+                emissive: [0.8,0.78,0.35]
+                emissiveStrength: 0.5
+        wheelSteel:
+            op: Material
+            with:
+                color: [0.19,0.21,0.21,1]
+                metallic: 0.88
+                roughness: 0.38
+        frameSteel:
+            op: Material
+            with:
+                color: [0.08,0.095,0.09,1]
+                metallic: 0.6
+                roughness: 0.64
+        roundedBox:
+            import: ./rounded-box.moon
+        lettering:
+            import: ./lettering.moon
+    render:
+        expression: |
+            const silver = assets.silver
+            const dark = assets.dark
+            const frameSteel = assets.frameSteel
+            const parts = []
+            const add = (geo,mat,pos=[0,0,0],rot=[0,0,0]) => parts.push(Transform({input:ApplyMaterial({input:geo,material:mat}),translate:pos,rotate:rot}))
+            const box = (size,pos,mat,r=0) => add(r ? assets.roundedBox({size,radius:r}) : Box({size}),mat,pos)
+            const cyl = (r,h,pos,mat,rot=[0,0,0]) => add(Cylinder({radiusLow:r,height:h,resolution:32}),mat,pos,rot)
+            const label = (text,size,position,rotation=[-90,0,0],color=[0.85,0.88,0.83,1]) => parts.push(assets.lettering({text,size,position,rotation,color}))
+            const tube = (path,r,mat) => add(Sweep({input:Circle({radius:r,resolution:10}),path}),mat)
+            const ring = (outer,inner,depth,pos,mat,rot=[0,0,0]) => add(Extrude({input:Difference([outer,inner]),height:depth}),mat,pos,rot)
+            // Equipment cabinets, air reservoirs, mounting brackets and brake piping.
+            for(const z of [-3.6,-1.45,1.0,3.1]) {
+                box([1.84,0.44,1.48],[0,0.56,z],frameSteel,0.035)
+                for(const side of [-1,1]) {
+                    box([0.023,0.35,1.33],[side*0.938,0.56,z],silver,0.009)
+                    for(let k=0;k<7;k++) box([0.012,0.016,0.78],[side*0.954,0.46+k*0.034,z],dark)
+                    for(const dz of [-0.61,0.61]) {
+                        box([0.10,0.18,0.065],[side*0.94,0.79,z+dz],dark)
+                        cyl(0.012,0.014,[side*0.958,0.67,z+dz],dark,[0,0,90])
+                    }
+                }
+            }
+            for(const side of [-1,1]) {
+                cyl(0.135,1.2,[side*1.15,0.63,-0.2],frameSteel,[90,0,0])
+                for(const z of [-0.61,0.21]) ring(Circle({radius:0.145,resolution:32}),Circle({radius:0.133,resolution:32}),0.034,[side*1.15,0.63,z],silver,[90,0,0])
+                tube([[side*1.28,0.79,-8.0],[side*1.28,0.79,-4.5],[side*1.27,0.77,4.4],[side*1.27,0.79,8.0]],0.019,dark)
+            }
+            return Group(parts)
+        produces: MESHES
+components/hvac.moon: |
+    moon: "1.0"
+    doc: |
+        One detailed HVAC assembly reused at three roof positions.
+    params:
+        body_color:
+            default: [0.49, 0.53, 0.52, 1]
+            kind: color
+        green:
+            default: [0.025, 0.46, 0.16, 1]
+            kind: color
+    assets:
+        silver:
+            op: Material
+            with:
+                color:
+                    param: body_color
+                metallic: 0.65
+                roughness: 0.48
+        trim:
+            op: Material
+            with:
+                color: [0.64,0.68,0.66,1]
+                metallic: 0.7
+                roughness: 0.4
+        white:
+            op: Material
+            with:
+                color: [0.84,0.87,0.85,1]
+                roughness: 0.36
+        green:
+            op: Material
+            with:
+                color:
+                    param: green
+                roughness: 0.42
+        dark:
+            op: Material
+            with:
+                color: [0.024,0.033,0.032,1]
+                roughness: 0.72
+        rubber:
+            op: Material
+            with:
+                color: [0.012,0.016,0.016,1]
+                roughness: 0.85
+        glass:
+            op: Material
+            with:
+                color: [0.035,0.065,0.065,1]
+                metallic: 0.28
+                roughness: 0.19
+        frontGlass:
+            op: Material
+            with:
+                color: [0.012,0.023,0.023,1]
+                metallic: 0.18
+                roughness: 0.14
+        red:
+            op: Material
+            with:
+                color: [0.85,0.015,0.008,1]
+                emissive: [1,0.025,0.01]
+                emissiveStrength: 2
+                roughness: 0.25
+        lamp:
+            op: Material
+            with:
+                color: [0.9,0.88,0.58,1]
+                emissive: [0.8,0.78,0.35]
+                emissiveStrength: 0.5
+        wheelSteel:
+            op: Material
+            with:
+                color: [0.19,0.21,0.21,1]
+                metallic: 0.88
+                roughness: 0.38
+        frameSteel:
+            op: Material
+            with:
+                color: [0.08,0.095,0.09,1]
+                metallic: 0.6
+                roughness: 0.64
+        roundedBox:
+            import: ./rounded-box.moon
+        lettering:
+            import: ./lettering.moon
+        assembly:
+            expression: |
+                const silver = assets.silver
+                const trim = assets.trim
+                const dark = assets.dark
+                const rubber = assets.rubber
+                const frameSteel = assets.frameSteel
+                const parts = []
+                const add = (geo,mat,pos=[0,0,0],rot=[0,0,0]) => parts.push(Transform({input:ApplyMaterial({input:geo,material:mat}),translate:pos,rotate:rot}))
+                const box = (size,pos,mat,r=0) => add(r ? assets.roundedBox({size,radius:r}) : Box({size}),mat,pos)
+                const cyl = (r,h,pos,mat,rot=[0,0,0]) => add(Cylinder({radiusLow:r,height:h,resolution:32}),mat,pos,rot)
+                const label = (text,size,position,rotation=[-90,0,0],color=[0.85,0.88,0.83,1]) => parts.push(assets.lettering({text,size,position,rotation,color}))
+                const tube = (path,r,mat) => add(Sweep({input:Circle({radius:r,resolution:10}),path}),mat)
+                const ring = (outer,inner,depth,pos,mat,rot=[0,0,0]) => add(Extrude({input:Difference([outer,inner]),height:depth}),mat,pos,rot)
+                // Hollow chamfered HVAC housings with recessed louvers and guarded fans.
+                {
+                    const z = 0
+                    const cuts = [Transform({input:Box({size:[2.19,0.33,2.77]}),translate:[0,4.115,z]})]
+                    for(const dz of [-0.91,-0.30,0.30,0.91]) cuts.push(Transform({
+                        input:Box({size:[2.6,0.25,0.47]}),translate:[0,4.1,z+dz]
+                    }))
+                    for(const dz of [-0.72,0.72]) cuts.push(Transform({
+                        input:Cylinder({radiusLow:0.36,height:0.3,resolution:48}),translate:[0,4.35,z+dz]
+                    }))
+                    add(Difference([
+                        Transform({input:Chamfer({input:Box({size:[2.36,0.48,2.95]}),distance:0.075}),translate:[0,4.12,z]}),
+                        ...cuts
+                    ]),trim)
+                    box([1.97,0.25,2.57],[0,4.06,z],dark,0.025)
+                    for(const side of [-1,1]) {
+                        for(const dz of [-0.91,-0.30,0.30,0.91]) {
+                            for(let j=0;j<5;j++) add(Box({size:[0.09,0.018,0.465]}),silver,[side*1.145,4.0+j*0.047,z+dz],[0,0,side*22])
+                        }
+                        for(const dz of [-1.17,1.17]) {
+                            box([0.14,0.065,0.18],[side*0.97,3.927,z+dz],dark,0.01)
+                            cyl(0.018,0.019,[side*1.08,4.326,z+dz],dark)
+                        }
+                        // Gasket supports the cover entirely above the housing's y=4.36 top.
+                        box([0.49,0.012,2.45],[side*0.80,4.366,z],rubber,0.002)
+                        box([0.50,0.013,2.46],[side*0.80,4.3785,z],silver,0.003)
+                        for(const dz of [-1.09,0,1.09]) cyl(0.012,0.008,[side*0.80,4.387,z+dz],dark)
+                    }
+                    for(const dz of [-0.72,0.72]) {
+                        cyl(0.345,0.022,[0,4.24,z+dz],rubber)
+                        for(let k=0;k<7;k++) {
+                            const a=k*Math.PI*2/7
+                            add(Box({size:[0.25,0.017,0.08]}),frameSteel,[0.16*Math.cos(a),4.277,z+dz+0.16*Math.sin(a)],[0,-k*360/7+24,9])
+                        }
+                        cyl(0.081,0.05,[0,4.285,z+dz],silver)
+                        for(const r of [0.115,0.215,0.31,0.37]) ring(
+                            Circle({radius:r,resolution:64}),Circle({radius:r-0.009,resolution:64}),
+                            0.012,[0,4.363,z+dz],r===0.37?trim:frameSteel)
+                        for(let k=0;k<6;k++) add(Box({size:[0.71,0.012,0.01]}),frameSteel,[0,4.38,z+dz],[0,k*30,0])
+                    }
+                    // The transverse seam stops short of the access covers instead of crossing them.
+                    box([1.07,0.012,0.025],[0,4.366,z],dark)
+                }
+                return Group(parts)
+            produces: MESHES
+    render:
+        op: Place
+        with:
+            positions: [[0,0,6.9],[0,0,0.6],[0,0,-3.6]]
+        input:
+            asset: assembly
+components/lettering.moon: |
+    moon: "1.0"
+    doc: |
+        Extruded lettering positioned on the train.
+    params:
+        text: "2514"
+        size: 0.18
+        position: [0, 0, 0]
+        rotation: [-90, 0, 0]
+        color: [0.85, 0.88, 0.83, 1]
+    render:
+        op: Transform
+        with:
+            translate:
+                param: position
+            rotate:
+                param: rotation
+            scale: [1, 1, -1]
+        input:
+            op: ApplyMaterial
+            with:
+                material:
+                    op: Material
+                    with:
+                        color:
+                            param: color
+                        roughness: 0.6
+            input:
+                op: Extrude
+                with:
+                    height: 0.002
+                input:
+                    op: Text
+                    with:
+                        text:
+                            param: text
+                        fontSize:
+                            param: size
+                        alignX: center
+                        alignY: center
+components/rounded-box.moon: |
+    moon: "1.0"
+    doc: |
+        Reusable rounded solid; identical dimensions share evaluated geometry.
+    params:
+        size: [1, 1, 1]
+        radius: 0.01
+    render:
+        op: RoundedBox
+        with:
+            size:
+                param: size
+            radius:
+                param: radius
+            resolution: 12
+components/sides.moon: |
+    moon: "1.0"
+    doc: |
+        Side doors, glazing, belt stripes and stainless ribs.
+    params:
+        body_color:
+            default: [0.49, 0.53, 0.52, 1]
+            kind: color
+        green:
+            default: [0.025, 0.46, 0.16, 1]
+            kind: color
+    assets:
+        silver:
+            op: Material
+            with:
+                color:
+                    param: body_color
+                metallic: 0.65
+                roughness: 0.48
+        trim:
+            op: Material
+            with:
+                color: [0.64,0.68,0.66,1]
+                metallic: 0.7
+                roughness: 0.4
+        white:
+            op: Material
+            with:
+                color: [0.84,0.87,0.85,1]
+                roughness: 0.36
+        green:
+            op: Material
+            with:
+                color:
+                    param: green
+                roughness: 0.42
+        dark:
+            op: Material
+            with:
+                color: [0.024,0.033,0.032,1]
+                roughness: 0.72
+        rubber:
+            op: Material
+            with:
+                color: [0.012,0.016,0.016,1]
+                roughness: 0.85
+        glass:
+            op: Material
+            with:
+                color: [0.035,0.065,0.065,1]
+                metallic: 0.28
+                roughness: 0.19
+        frontGlass:
+            op: Material
+            with:
+                color: [0.012,0.023,0.023,1]
+                metallic: 0.18
+                roughness: 0.14
+        red:
+            op: Material
+            with:
+                color: [0.85,0.015,0.008,1]
+                emissive: [1,0.025,0.01]
+                emissiveStrength: 2
+                roughness: 0.25
+        lamp:
+            op: Material
+            with:
+                color: [0.9,0.88,0.58,1]
+                emissive: [0.8,0.78,0.35]
+                emissiveStrength: 0.5
+        wheelSteel:
+            op: Material
+            with:
+                color: [0.19,0.21,0.21,1]
+                metallic: 0.88
+                roughness: 0.38
+        frameSteel:
+            op: Material
+            with:
+                color: [0.08,0.095,0.09,1]
+                metallic: 0.6
+                roughness: 0.64
+        roundedBox:
+            import: ./rounded-box.moon
+        lettering:
+            import: ./lettering.moon
+        doorLeaf:
+            op: Difference
+            input:
+                items:
+                  - op: Box
+                    with:
+                        size: [0.043, 2.13, 0.716]
+                  - op: Transform
+                    with:
+                        translate: [0, 0.36, 0]
+                    input:
+                        op: RoundedBox
+                        with:
+                            size: [0.18, 1.10, 0.43]
+                            radius: 0.065
+                            resolution: 16
+    render:
+        expression: |
+            const silver = assets.silver
+            const trim = assets.trim
+            const white = assets.white
+            const green = assets.green
+            const dark = assets.dark
+            const rubber = assets.rubber
+            const glass = assets.glass
+            const parts = []
+            const add = (geo,mat,pos=[0,0,0],rot=[0,0,0]) => parts.push(Transform({input:ApplyMaterial({input:geo,material:mat}),translate:pos,rotate:rot}))
+            const box = (size,pos,mat,r=0) => add(r ? assets.roundedBox({size,radius:r}) : Box({size}),mat,pos)
+            const cyl = (r,h,pos,mat,rot=[0,0,0]) => add(Cylinder({radiusLow:r,height:h,resolution:32}),mat,pos,rot)
+            const label = (text,size,position,rotation=[-90,0,0],color=[0.85,0.88,0.83,1]) => parts.push(assets.lettering({text,size,position,rotation,color}))
+            const tube = (path,r,mat) => add(Sweep({input:Circle({radius:r,resolution:10}),path}),mat)
+            const ring = (outer,inner,depth,pos,mat,rot=[0,0,0]) => add(Extrude({input:Difference([outer,inner]),height:depth}),mat,pos,rot)
             // Side doors, windows, belt stripe and pressed stainless ribs.
             for(const side of [-1,1]) {
                 const x = side*1.535
@@ -170,10 +1197,7 @@ main.moon: |
                         Rect({size:[1.49,2.17],cornerRadius:[0.035,0.035]}),
                         0.028,[side*1.518,2.16,z],trim,sideRotation)
                     for(const dz of [-0.369,0.369]) {
-                        const leaf = Difference([
-                            Transform({input:Box({size:[0.043,2.13,0.716]}),translate:[side*1.485,2.16,z+dz]}),
-                            Transform({input:RoundedBox({size:[0.18,1.10,0.43],radius:0.065,resolution:16}),translate:[side*1.485,2.52,z+dz]})
-                        ])
+                        const leaf = Transform({input:assets.doorLeaf,translate:[side*1.485,2.16,z+dz]})
                         add(leaf,trim)
                         ring(Rect({size:[0.46,1.13],cornerRadius:[0.072,0.072]}),
                             Rect({size:[0.386,1.055],cornerRadius:[0.057,0.057]}),
@@ -205,124 +1229,6 @@ main.moon: |
                 label("2514",0.09,[side*1.554,3.12,5.96],[-90,side*90,0],[0.18,0.24,0.28,1])
                 for(const z of [-8,-4,0,4,8]) box([0.07,0.075,0.13],[side*1.57,0.97,z],white)
             }
-            // Steel wheelsets with flange, tapered tread, recessed web and axle hubs.
-            const wheelSteel = Material({color:[0.19,0.21,0.21,1],metallic:0.88,roughness:0.38})
-            const frameSteel = Material({color:[0.08,0.095,0.09,1],metallic:0.6,roughness:0.64})
-            const wheel = Revolve({input:Polygon({points:[
-                [0,-0.105],[0.14,-0.105],[0.17,-0.054],[0.32,-0.052],
-                [0.36,-0.105],[0.445,-0.105],[0.445,-0.077],[0.417,-0.057],
-                [0.413,0.080],[0.37,0.094],[0.335,0.042],[0.18,0.042],
-                [0.145,0.109],[0,0.109]
-            ]}),resolution:64})
-            for(const z of [-6.55,6.1]) {
-                for(const dz of [-0.43,0.43]) box([2.36,0.19,0.18],[0,0.65,z+dz],frameSteel,0.026)
-                box([0.86,0.24,0.68],[0,0.73,z],frameSteel,0.045)
-                for(const dz of [-1.01,1.01]) {
-                    cyl(0.082,2.38,[0,0.445,z+dz],wheelSteel,[0,0,90])
-                    cyl(0.22,0.66,[0,0.57,z+dz*0.75],frameSteel,[0,0,90])
-                    for(const side of [-1,1]) {
-                        add(wheel,wheelSteel,[side*0.85,0.445,z+dz],[0,0,-side*90])
-                        cyl(0.145,0.095,[side*1.075,0.445,z+dz],frameSteel,[0,0,90])
-                        box([0.21,0.23,0.29],[side*1.16,0.445,z+dz],frameSteel,0.035)
-                        cyl(0.091,0.018,[side*1.276,0.445,z+dz],silver,[0,0,90])
-                        for(let k=0;k<6;k++) {
-                            const a=k*Math.PI/3
-                            cyl(0.014,0.024,[side*1.293,0.445+0.068*Math.cos(a),z+dz+0.068*Math.sin(a)],dark,[0,0,90])
-                        }
-                        box([0.14,0.24,0.19],[side*0.91,0.45,z+dz+0.35],frameSteel,0.025)
-                        tube([[side*1.14,0.66,z+dz],[side*1.15,0.64,z+dz+0.27],[side*0.98,0.52,z+dz+0.34]],0.016,dark)
-                    }
-                }
-                for(const side of [-1,1]) {
-                    tube([[side*1.12,0.55,z-1.26],[side*1.12,0.71,z-0.72],[side*1.12,0.72,z+0.72],[side*1.12,0.55,z+1.26]],0.095,frameSteel)
-                    cyl(0.27,0.055,[side*1.05,0.87,z],silver)
-                    cyl(0.245,0.15,[side*1.05,0.78,z],rubber)
-                    for(const y of [0.745,0.8,0.845]) cyl(0.253,0.018,[side*1.05,y,z],dark)
-                    for(const dz of [-0.76,0.76]) {
-                        const spring = []
-                        for(let k=0;k<=64;k++) {
-                            const a=k/64*Math.PI*10
-                            spring.push([side*1.16+0.087*Math.cos(a),0.53+k/64*0.20,z+dz+0.087*Math.sin(a)])
-                        }
-                        tube(spring,0.016,wheelSteel)
-                        cyl(0.116,0.025,[side*1.16,0.52,z+dz],frameSteel)
-                        cyl(0.116,0.025,[side*1.16,0.745,z+dz],frameSteel)
-                    }
-                    tube([[side*1.29,0.47,z-0.54],[side*1.29,0.77,z-0.23]],0.033,frameSteel)
-                    tube([[side*1.29,0.68,z-0.32],[side*1.29,0.9,z-0.08]],0.018,trim)
-                }
-            }
-            // Equipment cabinets, air reservoirs, mounting brackets and brake piping.
-            for(const z of [-3.6,-1.45,1.0,3.1]) {
-                box([1.84,0.44,1.48],[0,0.56,z],frameSteel,0.035)
-                for(const side of [-1,1]) {
-                    box([0.023,0.35,1.33],[side*0.938,0.56,z],silver,0.009)
-                    for(let k=0;k<7;k++) box([0.012,0.016,0.78],[side*0.954,0.46+k*0.034,z],dark)
-                    for(const dz of [-0.61,0.61]) {
-                        box([0.10,0.18,0.065],[side*0.94,0.79,z+dz],dark)
-                        cyl(0.012,0.014,[side*0.958,0.67,z+dz],dark,[0,0,90])
-                    }
-                }
-            }
-            for(const side of [-1,1]) {
-                cyl(0.135,1.2,[side*1.15,0.63,-0.2],frameSteel,[90,0,0])
-                for(const z of [-0.61,0.21]) ring(Circle({radius:0.145,resolution:32}),Circle({radius:0.133,resolution:32}),0.034,[side*1.15,0.63,z],silver,[90,0,0])
-                tube([[side*1.28,0.79,-8.0],[side*1.28,0.79,-4.5],[side*1.27,0.77,4.4],[side*1.27,0.79,8.0]],0.019,dark)
-            }
-            // Hollow chamfered HVAC housings with recessed louvers and guarded fans.
-            for(const z of [6.9,0.6,-3.6]) {
-                const cuts = [Transform({input:Box({size:[2.19,0.33,2.77]}),translate:[0,4.115,z]})]
-                for(const dz of [-0.91,-0.30,0.30,0.91]) cuts.push(Transform({
-                    input:Box({size:[2.6,0.25,0.47]}),translate:[0,4.1,z+dz]
-                }))
-                for(const dz of [-0.72,0.72]) cuts.push(Transform({
-                    input:Cylinder({radiusLow:0.36,height:0.3,resolution:48}),translate:[0,4.35,z+dz]
-                }))
-                add(Difference([
-                    Transform({input:Chamfer({input:Box({size:[2.36,0.48,2.95]}),distance:0.075}),translate:[0,4.12,z]}),
-                    ...cuts
-                ]),trim)
-                box([1.97,0.25,2.57],[0,4.06,z],dark,0.025)
-                for(const side of [-1,1]) {
-                    for(const dz of [-0.91,-0.30,0.30,0.91]) {
-                        for(let j=0;j<5;j++) add(Box({size:[0.09,0.018,0.465]}),silver,[side*1.145,4.0+j*0.047,z+dz],[0,0,side*22])
-                    }
-                    for(const dz of [-1.17,1.17]) {
-                        box([0.14,0.065,0.18],[side*0.97,3.927,z+dz],dark,0.01)
-                        cyl(0.018,0.019,[side*1.08,4.326,z+dz],dark)
-                    }
-                    // Gasket supports the cover entirely above the housing's y=4.36 top.
-                    box([0.49,0.012,2.45],[side*0.80,4.366,z],rubber,0.002)
-                    box([0.50,0.013,2.46],[side*0.80,4.3785,z],silver,0.003)
-                    for(const dz of [-1.09,0,1.09]) cyl(0.012,0.008,[side*0.80,4.387,z+dz],dark)
-                }
-                for(const dz of [-0.72,0.72]) {
-                    cyl(0.345,0.022,[0,4.24,z+dz],rubber)
-                    for(let k=0;k<7;k++) {
-                        const a=k*Math.PI*2/7
-                        add(Box({size:[0.25,0.017,0.08]}),frameSteel,[0.16*Math.cos(a),4.277,z+dz+0.16*Math.sin(a)],[0,-k*360/7+24,9])
-                    }
-                    cyl(0.081,0.05,[0,4.285,z+dz],silver)
-                    for(const r of [0.115,0.215,0.31,0.37]) ring(
-                        Circle({radius:r,resolution:64}),Circle({radius:r-0.009,resolution:64}),
-                        0.012,[0,4.363,z+dz],r===0.37?trim:frameSteel)
-                    for(let k=0;k<6;k++) add(Box({size:[0.71,0.012,0.01]}),frameSteel,[0,4.38,z+dz],[0,k*30,0])
-                }
-                // The transverse seam stops short of the access covers instead of crossing them.
-                box([1.07,0.012,0.025],[0,4.366,z],dark)
-            }
-            for(const x of [-1.24,-0.97,0.97,1.24]) box([0.028,0.025,17.9],[x,3.954,-0.15],silver)
-            cyl(0.031,0.32,[0,4.08,-8.47],trim)
-            cyl(0.072,0.055,[0,4.265,-8.47],white)
-            // Flat trailing end with diaphragm, emergency door and coupling.
-            box([1.4,2.54,0.18],[0,2.05,-9.71],rubber,0.13)
-            box([0.99,2.19,0.19],[0,2.13,-9.81],silver,0.06)
-            box([0.67,0.89,0.025],[0,2.57,-9.917],glass,0.06)
-            for(let i=0;i<6;i++) {
-                box([0.08,2.35,0.037],[-0.66,2.06,-9.72-i*0.035],dark)
-                box([0.08,2.35,0.037],[0.66,2.06,-9.72-i*0.035],dark)
-            }
-            box([0.36,0.29,0.68],[0,0.64,-9.93],dark,0.04)
             return Group(parts)
         produces: MESHES
 main.moon.webp: !!binary |
