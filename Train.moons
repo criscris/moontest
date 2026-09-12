@@ -1,0 +1,424 @@
+# moons v1
+main.moon: |
+    moon: "1.0"
+    doc: |
+        Seoul Metro 2514 subway car reconstructed from the supplied references.
+        Full-size isolated car with cab glazing, sliding doors, roof HVAC and running gear.
+    params:
+        body_color:
+            default: [0.49, 0.53, 0.52, 1]
+            kind: color
+        green:
+            default: [0.025, 0.46, 0.16, 1]
+            kind: color
+    assets:
+        lettering:
+            doc: |
+                Extruded lettering positioned on the train.
+            params:
+                text: "2514"
+                size: 0.18
+                position: [0, 0, 0]
+                rotation: [-90, 0, 0]
+                color: [0.85, 0.88, 0.83, 1]
+            render:
+                op: Transform
+                with:
+                    translate:
+                        param: position
+                    rotate:
+                        param: rotation
+                    scale: [1, 1, -1]
+                input:
+                    op: ApplyMaterial
+                    with:
+                        material:
+                            op: Material
+                            with:
+                                color:
+                                    param: color
+                                roughness: 0.6
+                    input:
+                        op: Extrude
+                        with:
+                            height: 0.002
+                        input:
+                            op: Text
+                            with:
+                                text:
+                                    param: text
+                                fontSize:
+                                    param: size
+                                alignX: center
+                                alignY: center
+    render:
+        expression: |
+            const silver = Material({color:params.body_color,metallic:0.65,roughness:0.48})
+            const trim = Material({color:[0.64,0.68,0.66,1],metallic:0.7,roughness:0.4})
+            const white = Material({color:[0.84,0.87,0.85,1],roughness:0.36})
+            const green = Material({color:params.green,roughness:0.42})
+            const dark = Material({color:[0.024,0.033,0.032,1],roughness:0.72})
+            const rubber = Material({color:[0.012,0.016,0.016,1],roughness:0.85})
+            const glass = Material({color:[0.035,0.065,0.065,1],metallic:0.28,roughness:0.19})
+            const frontGlass = Material({color:[0.012,0.023,0.023,1],metallic:0.18,roughness:0.14})
+            const red = Material({color:[0.85,0.015,0.008,1],emissive:[1,0.025,0.01],emissiveStrength:2,roughness:0.25})
+            const lamp = Material({color:[0.9,0.88,0.58,1],emissive:[0.8,0.78,0.35],emissiveStrength:0.5})
+            const parts = []
+            const add = (geo,mat,pos=[0,0,0],rot=[0,0,0]) => parts.push(Transform({input:ApplyMaterial({input:geo,material:mat}),translate:pos,rotate:rot}))
+            const box = (size,pos,mat,r=0) => add(r ? RoundedBox({size,radius:r,resolution:12}) : Box({size}),mat,pos)
+            const cyl = (r,h,pos,mat,rot=[0,0,0]) => add(Cylinder({radiusLow:r,height:h,resolution:32}),mat,pos,rot)
+            const label = (text,size,position,rotation=[-90,0,0],color=[0.85,0.88,0.83,1]) => parts.push(assets.lettering({text,size,position,rotation,color}))
+            const tube = (path,r,mat) => add(Sweep({input:Circle({radius:r,resolution:10}),path}),mat)
+            const ring = (outer,inner,depth,pos,mat,rot=[0,0,0]) => add(Extrude({input:Difference([outer,inner]),height:depth}),mat,pos,rot)
+            // Hollow stainless shell with actual door and window apertures.
+            const openings = []
+            for(const z of [6.9,2.5,-1.9,-6.3]) openings.push(Transform({
+                input:RoundedBox({size:[3.5,2.2,1.52],radius:0.045,resolution:12}),translate:[0,2.16,z]
+            }))
+            for(const z of [4.7,0.3,-4.1,-8.35]) openings.push(Transform({
+                input:RoundedBox({size:[3.5,1.2,z < -8 ? 1.5 : 2.17],radius:0.075,resolution:12}),translate:[0,2.5,z]
+            }))
+            const shell = Difference([
+                Transform({input:RoundedBox({size:[3.04,2.83,19.3],radius:0.17,resolution:16}),translate:[0,2.31,0]}),
+                Transform({input:Box({size:[2.8,2.56,19.04]}),translate:[0,2.31,0]}),
+                ...openings
+            ])
+            add(shell,silver)
+            box([3.02,0.44,19.15],[0,3.72,-0.05],silver,0.2)
+            box([2.87,0.12,18.8],[0,3.94,-0.12],dark,0.04)
+            box([2.9,0.22,18.9],[0,0.91,-0.05],trim,0.04)
+            box([2.4,0.3,18.4],[0,0.71,-0.1],dark,0.06)
+            // Arched cab mask, curved glazing and sloping lower skirt.
+            const cabStart = parts.length
+            box([3.09,3.13,1.13],[0,2.37,9.2],green,0.24)
+            // Uniform planar triangulation preserves thin panel edges during cab bending.
+            const front = (profile,depth,z,mat) => add(Smooth({input:Extrude({input:profile,height:depth}),subdivisions:3,minSharpAngle:1,minSmoothness:0}),mat,[0,0,z],[-90,0,0])
+            const displayPanel = (profile,depth,z,mat) => {
+                const panel = Triangulate({input:profile,edgeLength:0.06})
+                const n = panel.vertices.length
+                const vertices = [
+                    ...panel.vertices.map(v => [v[0],0,v[1]]),
+                    ...panel.vertices.map(v => [v[0],depth,v[1]])
+                ]
+                const triangles = panel.triangles.flatMap(t => [
+                    [t[0],t[1],t[2]],[t[2]+n,t[1]+n,t[0]+n]
+                ])
+                const boundary = new Map()
+                for(const t of panel.triangles) {
+                    for(let i=0;i<3;i++) {
+                        const a=t[i], b=t[(i+1)%3]
+                        const key=Math.min(a,b)+":"+Math.max(a,b)
+                        if(boundary.has(key)) boundary.delete(key)
+                        else boundary.set(key,[a,b])
+                    }
+                }
+                for(const [a,b] of boundary.values()) {
+                    triangles.push([b,a,a+n],[b,a+n,b+n])
+                }
+                add(Mesh({vertices,triangles}),mat,[0,0,z],[-90,0,0])
+            }
+            const face = Path({d:"M -1.5 0.64 L -1.51 3.49 Q -1.5 3.72 -1.25 3.81 Q 0 4.02 1.25 3.81 Q 1.5 3.72 1.51 3.49 L 1.5 0.64 L 1.2 0.69 L 1.22 1.02 Q 1.2 1.12 1.05 1.17 Q 0 1.36 -1.05 1.17 Q -1.2 1.12 -1.22 1.02 L -1.2 0.69 Z",resolution:96})
+            const windshield = Path({d:"M -1.105 1.77 L -1.115 3.51 Q 0 3.79 1.115 3.51 L 1.105 1.77 Q 0 1.65 -1.105 1.77 Z",resolution:96})
+            const display = Transform({input:Rect({size:[1.92,0.3],cornerRadius:[0.015,0.015]}),translate:[0,3.39]})
+            const windshieldOpening = Offset({input:windshield,delta:0.025})
+            // Frame and gasket are rings, with no hidden faces crossing behind the glass.
+            front(Difference([face,windshieldOpening]),0.25,9.94,white)
+            front(Difference([windshieldOpening,windshield]),0.023,9.962,rubber)
+            // Deep black recess closes tiny edge gaps without a near-coplanar backing face.
+            front(windshieldOpening,0.025,9.90,rubber)
+            // Uniformly meshed glazing avoids distorted sliver triangles along its arch.
+            // A 3 mm lip covers the gasket edge at a separate depth.
+            displayPanel(Offset({input:windshield,delta:0.003}),0.015,9.973,frontGlass)
+            front(Path({d:"M -1.13 1.78 Q 0 1.68 1.13 1.78 L 1.13 1.38 Q 0 1.28 -1.13 1.38 Z"}),0.035,9.977,dark)
+            tube([[-1.34,1.32,9.956],[-0.9,1.30,9.956],[0,1.29,9.956],[0.9,1.30,9.956],[1.34,1.32,9.956]],0.019,rubber)
+            front(Path({d:"M -1.24 0.65 L -1.26 1.04 L -1.05 1.14 Q 0 1.33 1.05 1.14 L 1.26 1.04 L 1.24 0.65 L 0.57 0.62 L 0.57 0.89 L -0.57 0.89 L -0.57 0.62 Z"}),0.25,9.88,rubber)
+            box([0.54,0.16,0.52],[0,0.76,9.98],dark,0.025)
+            box([0.38,0.25,0.23],[0,0.75,10.24],silver,0.035)
+            box([0.22,0.13,0.035],[0,0.76,10.369],dark,0.02)
+            for(const x of [-0.15,0.15]) cyl(0.027,0.035,[x,0.75,10.39],trim,[90,0,0])
+            for(const x of [-0.44,0.44]) tube([[x,0.92,9.86],[x,0.65,9.98],[x*0.8,0.51,10.08],[x*0.5,0.58,10.15]],0.029,rubber)
+            for (const x of [-0.97,0.97]) {
+                for(let j=0;j<4;j++) box([0.49,0.045,0.055],[x,0.69+j*0.105,9.962],trim,0.014)
+                cyl(0.086,0.023,[x,1.57,10.001],lamp,[90,0,0])
+                for(const y of [1.505,1.625]) box([0.31,0.06,0.026],[x*0.73,y,10.002],red,0.022)
+            }
+            // The display follows the cab curvature with 11 mm clearance behind its back face.
+            displayPanel(display,0.015,9.999,rubber)
+            label("신설     2514",0.17,[0,3.39,10.019],[-90,0,0],[0.77,1,0.28,1])
+            label("2514",0.205,[0,1.565,10.002])
+            label("2514",0.11,[-0.91,1.94,10.002])
+            label("Seoul Metro",0.085,[0.63,1.93,10.004])
+            // Windshield wiper arm and blade, both stand clear of the glazing.
+            add(Box({size:[0.63,0.035,0.025]}),trim,[0.37,2.08,9.987],[0,0,22])
+            add(Box({size:[0.39,0.018,0.026]}),rubber,[0.18,2.03,10.004],[0,0,22])
+            label("Seoul Metro",0.18,[1.337,2.51,9.969],[-90,0,-90],[0.025,0.4,0.13,1])
+            // Circular green metro emblem on the white cab pillar.
+            cyl(0.126,0.016,[1.32,3.28,9.971],green,[90,0,0])
+            for(const y of [3.235,3.295]) box([0.255,0.027,0.018],[1.32,y,9.985],white)
+            // Bow the front surface across its width; rake the skirt beneath the cab.
+            for(let i=cabStart;i<parts.length;i++) {
+                parts[i] = Group(parts[i].meshes.map(m => Mesh({
+                    vertices:m.vertices.map(v => [v[0],v[1],v[2]-0.035*v[0]*v[0]-0.16*Math.max(0,1.25-v[1])]),
+                    triangles:m.triangles,material:m.material
+                })))
+            }
+            // Side doors, windows, belt stripe and pressed stainless ribs.
+            for(const side of [-1,1]) {
+                const x = side*1.535
+                // End the stripe and ribs 8 mm before each door frame's outer edge.
+                // Stripe and frame fronts share a depth, so their footprints must not overlap.
+                for(const span of [[-9.38,-7.108],[-5.492,-2.708],[-1.092,1.692],[3.308,6.092],[7.708,8.59]]) {
+                    const length = span[1]-span[0], z = (span[0]+span[1])/2
+                    box([0.022,0.27,length],[x,1.55,z],green)
+                    for(const y of [1.09,1.18,1.29]) box([0.028,0.026,length],[x,y,z],trim,0.006)
+                }
+                for(const y of [3.32,3.46,3.57]) box([0.025,0.027,18.0],[x,y,-0.4],trim,0.006)
+                // Driver's narrow side door.
+                box([0.06,2.22,0.69],[side*1.566,2.02,9.0],trim,0.025)
+                box([0.068,2.1,0.59],[side*1.6,2.02,9.0],dark,0.022)
+                box([0.074,1.01,0.49],[side*1.611,2.48,9.0],glass,0.03)
+                box([0.08,0.035,0.14],[side*1.621,1.79,8.8],trim,0.008)
+                const sideRotation = [-90,-side*90,0]
+                for(const z of [6.9,2.5,-1.9,-6.3]) {
+                    box([0.018,2.18,1.50],[side*1.445,2.16,z],rubber,0.035)
+                    ring(Rect({size:[1.60,2.28],cornerRadius:[0.045,0.045]}),
+                        Rect({size:[1.49,2.17],cornerRadius:[0.035,0.035]}),
+                        0.028,[side*1.518,2.16,z],trim,sideRotation)
+                    for(const dz of [-0.369,0.369]) {
+                        const leaf = Difference([
+                            Transform({input:Box({size:[0.043,2.13,0.716]}),translate:[side*1.485,2.16,z+dz]}),
+                            Transform({input:RoundedBox({size:[0.18,1.10,0.43],radius:0.065,resolution:16}),translate:[side*1.485,2.52,z+dz]})
+                        ])
+                        add(leaf,trim)
+                        ring(Rect({size:[0.46,1.13],cornerRadius:[0.072,0.072]}),
+                            Rect({size:[0.386,1.055],cornerRadius:[0.057,0.057]}),
+                            0.023,[side*1.499,2.52,z+dz],rubber,sideRotation)
+                        box([0.016,1.055,0.386],[side*1.482,2.52,z+dz],glass,0.007)
+                        box([0.012,0.21,0.025],[side*1.51,1.42,z+dz*0.27],dark,0.005)
+                        for(const y of [1.19,3.12]) cyl(0.009,0.009,[side*1.516,y,z+dz],dark,[0,0,90])
+                    }
+                    box([0.018,2.1,0.019],[side*1.51,2.16,z],rubber)
+                    box([0.19,0.065,1.62],[side*1.53,1.053,z],trim,0.01)
+                    for(const dx of [1.47,1.52,1.57]) box([0.009,0.008,1.48],[side*dx,1.089,z],dark)
+                    box([0.046,0.061,1.58],[side*1.543,3.285,z],silver,0.012)
+                    box([0.05,0.085,0.12],[side*1.554,3.08,z+0.94],white,0.015)
+                }
+                for(const z of [4.7,0.3,-4.1,-8.35]) {
+                    const w = z < -8 ? 1.58 : 2.25
+                    ring(Rect({size:[w,1.28],cornerRadius:[0.10,0.10]}),
+                        Rect({size:[w-0.085,1.195],cornerRadius:[0.073,0.073]}),
+                        0.025,[side*1.523,2.5,z],trim,sideRotation)
+                    ring(Rect({size:[w-0.075,1.205],cornerRadius:[0.079,0.079]}),
+                        Rect({size:[w-0.155,1.125],cornerRadius:[0.055,0.055]}),
+                        0.021,[side*1.512,2.5,z],rubber,sideRotation)
+                    box([0.018,1.14,w-0.14],[side*1.49,2.5,z],glass,0.008)
+                    box([0.045,0.035,w+0.035],[side*1.539,1.854,z],silver,0.008)
+                    for(const dz of [-w/2+0.12,w/2-0.12]) box([0.012,0.02,0.045],[side*1.556,1.88,z+dz],dark)
+                }
+                // Small service badges and vehicle identifiers.
+                for(const z of [5.95,-2.85]) {
+                    cyl(0.095,0.02,[side*1.646,1.81,z],Material({color:[0.07,0.23,0.5,1]}),[0,0,90])
+                }
+                box([0.012,0.15,0.30],[side*1.541,3.12,5.96],white,0.006)
+                label("2514",0.09,[side*1.554,3.12,5.96],[-90,side*90,0],[0.18,0.24,0.28,1])
+                for(const z of [-8,-4,0,4,8]) box([0.07,0.075,0.13],[side*1.57,0.97,z],white)
+            }
+            // Steel wheelsets with flange, tapered tread, recessed web and axle hubs.
+            const wheelSteel = Material({color:[0.19,0.21,0.21,1],metallic:0.88,roughness:0.38})
+            const frameSteel = Material({color:[0.08,0.095,0.09,1],metallic:0.6,roughness:0.64})
+            const wheel = Revolve({input:Polygon({points:[
+                [0,-0.105],[0.14,-0.105],[0.17,-0.054],[0.32,-0.052],
+                [0.36,-0.105],[0.445,-0.105],[0.445,-0.077],[0.417,-0.057],
+                [0.413,0.080],[0.37,0.094],[0.335,0.042],[0.18,0.042],
+                [0.145,0.109],[0,0.109]
+            ]}),resolution:64})
+            for(const z of [-6.55,6.1]) {
+                for(const dz of [-0.43,0.43]) box([2.36,0.19,0.18],[0,0.65,z+dz],frameSteel,0.026)
+                box([0.86,0.24,0.68],[0,0.73,z],frameSteel,0.045)
+                for(const dz of [-1.01,1.01]) {
+                    cyl(0.082,2.38,[0,0.445,z+dz],wheelSteel,[0,0,90])
+                    cyl(0.22,0.66,[0,0.57,z+dz*0.75],frameSteel,[0,0,90])
+                    for(const side of [-1,1]) {
+                        add(wheel,wheelSteel,[side*0.85,0.445,z+dz],[0,0,-side*90])
+                        cyl(0.145,0.095,[side*1.075,0.445,z+dz],frameSteel,[0,0,90])
+                        box([0.21,0.23,0.29],[side*1.16,0.445,z+dz],frameSteel,0.035)
+                        cyl(0.091,0.018,[side*1.276,0.445,z+dz],silver,[0,0,90])
+                        for(let k=0;k<6;k++) {
+                            const a=k*Math.PI/3
+                            cyl(0.014,0.024,[side*1.293,0.445+0.068*Math.cos(a),z+dz+0.068*Math.sin(a)],dark,[0,0,90])
+                        }
+                        box([0.14,0.24,0.19],[side*0.91,0.45,z+dz+0.35],frameSteel,0.025)
+                        tube([[side*1.14,0.66,z+dz],[side*1.15,0.64,z+dz+0.27],[side*0.98,0.52,z+dz+0.34]],0.016,dark)
+                    }
+                }
+                for(const side of [-1,1]) {
+                    tube([[side*1.12,0.55,z-1.26],[side*1.12,0.71,z-0.72],[side*1.12,0.72,z+0.72],[side*1.12,0.55,z+1.26]],0.095,frameSteel)
+                    cyl(0.27,0.055,[side*1.05,0.87,z],silver)
+                    cyl(0.245,0.15,[side*1.05,0.78,z],rubber)
+                    for(const y of [0.745,0.8,0.845]) cyl(0.253,0.018,[side*1.05,y,z],dark)
+                    for(const dz of [-0.76,0.76]) {
+                        const spring = []
+                        for(let k=0;k<=64;k++) {
+                            const a=k/64*Math.PI*10
+                            spring.push([side*1.16+0.087*Math.cos(a),0.53+k/64*0.20,z+dz+0.087*Math.sin(a)])
+                        }
+                        tube(spring,0.016,wheelSteel)
+                        cyl(0.116,0.025,[side*1.16,0.52,z+dz],frameSteel)
+                        cyl(0.116,0.025,[side*1.16,0.745,z+dz],frameSteel)
+                    }
+                    tube([[side*1.29,0.47,z-0.54],[side*1.29,0.77,z-0.23]],0.033,frameSteel)
+                    tube([[side*1.29,0.68,z-0.32],[side*1.29,0.9,z-0.08]],0.018,trim)
+                }
+            }
+            // Equipment cabinets, air reservoirs, mounting brackets and brake piping.
+            for(const z of [-3.6,-1.45,1.0,3.1]) {
+                box([1.84,0.44,1.48],[0,0.56,z],frameSteel,0.035)
+                for(const side of [-1,1]) {
+                    box([0.023,0.35,1.33],[side*0.938,0.56,z],silver,0.009)
+                    for(let k=0;k<7;k++) box([0.012,0.016,0.78],[side*0.954,0.46+k*0.034,z],dark)
+                    for(const dz of [-0.61,0.61]) {
+                        box([0.10,0.18,0.065],[side*0.94,0.79,z+dz],dark)
+                        cyl(0.012,0.014,[side*0.958,0.67,z+dz],dark,[0,0,90])
+                    }
+                }
+            }
+            for(const side of [-1,1]) {
+                cyl(0.135,1.2,[side*1.15,0.63,-0.2],frameSteel,[90,0,0])
+                for(const z of [-0.61,0.21]) ring(Circle({radius:0.145,resolution:32}),Circle({radius:0.133,resolution:32}),0.034,[side*1.15,0.63,z],silver,[90,0,0])
+                tube([[side*1.28,0.79,-8.0],[side*1.28,0.79,-4.5],[side*1.27,0.77,4.4],[side*1.27,0.79,8.0]],0.019,dark)
+            }
+            // Hollow chamfered HVAC housings with recessed louvers and guarded fans.
+            for(const z of [6.9,0.6,-3.6]) {
+                const cuts = [Transform({input:Box({size:[2.19,0.33,2.77]}),translate:[0,4.115,z]})]
+                for(const dz of [-0.91,-0.30,0.30,0.91]) cuts.push(Transform({
+                    input:Box({size:[2.6,0.25,0.47]}),translate:[0,4.1,z+dz]
+                }))
+                for(const dz of [-0.72,0.72]) cuts.push(Transform({
+                    input:Cylinder({radiusLow:0.36,height:0.3,resolution:48}),translate:[0,4.35,z+dz]
+                }))
+                add(Difference([
+                    Transform({input:Chamfer({input:Box({size:[2.36,0.48,2.95]}),distance:0.075}),translate:[0,4.12,z]}),
+                    ...cuts
+                ]),trim)
+                box([1.97,0.25,2.57],[0,4.06,z],dark,0.025)
+                for(const side of [-1,1]) {
+                    for(const dz of [-0.91,-0.30,0.30,0.91]) {
+                        for(let j=0;j<5;j++) add(Box({size:[0.09,0.018,0.465]}),silver,[side*1.145,4.0+j*0.047,z+dz],[0,0,side*22])
+                    }
+                    for(const dz of [-1.17,1.17]) {
+                        box([0.14,0.065,0.18],[side*0.97,3.927,z+dz],dark,0.01)
+                        cyl(0.018,0.019,[side*1.08,4.326,z+dz],dark)
+                    }
+                    // Gasket supports the cover entirely above the housing's y=4.36 top.
+                    box([0.49,0.012,2.45],[side*0.80,4.366,z],rubber,0.002)
+                    box([0.50,0.013,2.46],[side*0.80,4.3785,z],silver,0.003)
+                    for(const dz of [-1.09,0,1.09]) cyl(0.012,0.008,[side*0.80,4.387,z+dz],dark)
+                }
+                for(const dz of [-0.72,0.72]) {
+                    cyl(0.345,0.022,[0,4.24,z+dz],rubber)
+                    for(let k=0;k<7;k++) {
+                        const a=k*Math.PI*2/7
+                        add(Box({size:[0.25,0.017,0.08]}),frameSteel,[0.16*Math.cos(a),4.277,z+dz+0.16*Math.sin(a)],[0,-k*360/7+24,9])
+                    }
+                    cyl(0.081,0.05,[0,4.285,z+dz],silver)
+                    for(const r of [0.115,0.215,0.31,0.37]) ring(
+                        Circle({radius:r,resolution:64}),Circle({radius:r-0.009,resolution:64}),
+                        0.012,[0,4.363,z+dz],r===0.37?trim:frameSteel)
+                    for(let k=0;k<6;k++) add(Box({size:[0.71,0.012,0.01]}),frameSteel,[0,4.38,z+dz],[0,k*30,0])
+                }
+                // The transverse seam stops short of the access covers instead of crossing them.
+                box([1.07,0.012,0.025],[0,4.366,z],dark)
+            }
+            for(const x of [-1.24,-0.97,0.97,1.24]) box([0.028,0.025,17.9],[x,3.954,-0.15],silver)
+            cyl(0.031,0.32,[0,4.08,-8.47],trim)
+            cyl(0.072,0.055,[0,4.265,-8.47],white)
+            // Flat trailing end with diaphragm, emergency door and coupling.
+            box([1.4,2.54,0.18],[0,2.05,-9.71],rubber,0.13)
+            box([0.99,2.19,0.19],[0,2.13,-9.81],silver,0.06)
+            box([0.67,0.89,0.025],[0,2.57,-9.917],glass,0.06)
+            for(let i=0;i<6;i++) {
+                box([0.08,2.35,0.037],[-0.66,2.06,-9.72-i*0.035],dark)
+                box([0.08,2.35,0.037],[0.66,2.06,-9.72-i*0.035],dark)
+            }
+            box([0.36,0.29,0.68],[0,0.64,-9.93],dark,0.04)
+            return Group(parts)
+        produces: MESHES
+main.moon.webp: !!binary |
+    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
+    QDMy8t7/l0AAAAAAAAA=
