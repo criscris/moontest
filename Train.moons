@@ -93,30 +93,8 @@ main.moon: |
             box([3.09,3.13,1.13],[0,2.37,9.2],green,0.24)
             // Uniform planar triangulation preserves thin panel edges during cab bending.
             const front = (profile,depth,z,mat) => add(Smooth({input:Extrude({input:profile,height:depth}),subdivisions:3,minSharpAngle:1,minSmoothness:0}),mat,[0,0,z],[-90,0,0])
-            const displayPanel = (profile,depth,z,mat) => {
-                const panel = Triangulate({input:profile,edgeLength:0.06})
-                const n = panel.vertices.length
-                const vertices = [
-                    ...panel.vertices.map(v => [v[0],0,v[1]]),
-                    ...panel.vertices.map(v => [v[0],depth,v[1]])
-                ]
-                const triangles = panel.triangles.flatMap(t => [
-                    [t[0],t[1],t[2]],[t[2]+n,t[1]+n,t[0]+n]
-                ])
-                const boundary = new Map()
-                for(const t of panel.triangles) {
-                    for(let i=0;i<3;i++) {
-                        const a=t[i], b=t[(i+1)%3]
-                        const key=Math.min(a,b)+":"+Math.max(a,b)
-                        if(boundary.has(key)) boundary.delete(key)
-                        else boundary.set(key,[a,b])
-                    }
-                }
-                for(const [a,b] of boundary.values()) {
-                    triangles.push([b,a,a+n],[b,a+n,b+n])
-                }
-                add(Mesh({vertices,triangles}),mat,[0,0,z],[-90,0,0])
-            }
+            // Standard extruded panels keep the glass face separate from its thin edge walls.
+            const displayPanel = front
             const face = Path({d:"M -1.5 0.64 L -1.51 3.49 Q -1.5 3.72 -1.25 3.81 Q 0 4.02 1.25 3.81 Q 1.5 3.72 1.51 3.49 L 1.5 0.64 L 1.2 0.69 L 1.22 1.02 Q 1.2 1.12 1.05 1.17 Q 0 1.36 -1.05 1.17 Q -1.2 1.12 -1.22 1.02 L -1.2 0.69 Z",resolution:96})
             const windshield = Path({d:"M -1.105 1.77 L -1.115 3.51 Q 0 3.79 1.115 3.51 L 1.105 1.77 Q 0 1.65 -1.105 1.77 Z",resolution:96})
             const display = Transform({input:Rect({size:[1.92,0.3],cornerRadius:[0.015,0.015]}),translate:[0,3.39]})
@@ -126,8 +104,7 @@ main.moon: |
             front(Difference([windshieldOpening,windshield]),0.023,9.962,rubber)
             // Deep black recess closes tiny edge gaps without a near-coplanar backing face.
             front(windshieldOpening,0.025,9.90,rubber)
-            // Uniformly meshed glazing avoids distorted sliver triangles along its arch.
-            // A 3 mm lip covers the gasket edge at a separate depth.
+            // A single extruded pane with a 3 mm lip covers the gasket at a separate depth.
             displayPanel(Offset({input:windshield,delta:0.003}),0.015,9.973,frontGlass)
             front(Path({d:"M -1.13 1.78 Q 0 1.68 1.13 1.78 L 1.13 1.38 Q 0 1.28 -1.13 1.38 Z"}),0.035,9.977,dark)
             tube([[-1.34,1.32,9.956],[-0.9,1.30,9.956],[0,1.29,9.956],[0.9,1.30,9.956],[1.34,1.32,9.956]],0.019,rubber)
@@ -159,6 +136,14 @@ main.moon: |
             for(let i=cabStart;i<parts.length;i++) {
                 parts[i] = Group(parts[i].meshes.map(m => Mesh({
                     vertices:m.vertices.map(v => [v[0],v[1],v[2]-0.035*v[0]*v[0]-0.16*Math.max(0,1.25-v[1])]),
+                    // Inverse-transpose of the bend: retain hard rim normals and smooth face reflections.
+                    normals:m.normals.map((n,j) => {
+                        const v=m.vertices[j]
+                        const nx=n[0]+0.07*v[0]*n[2]
+                        const ny=n[1]-(v[1]<1.25 ? 0.16*n[2] : 0)
+                        const length=Math.hypot(nx,ny,n[2])
+                        return [nx/length,ny/length,n[2]/length]
+                    }),
                     triangles:m.triangles,material:m.material
                 })))
             }
@@ -215,10 +200,7 @@ main.moon: |
                     box([0.045,0.035,w+0.035],[side*1.539,1.854,z],silver,0.008)
                     for(const dz of [-w/2+0.12,w/2-0.12]) box([0.012,0.02,0.045],[side*1.556,1.88,z+dz],dark)
                 }
-                // Small service badges and vehicle identifiers.
-                for(const z of [5.95,-2.85]) {
-                    cyl(0.095,0.02,[side*1.646,1.81,z],Material({color:[0.07,0.23,0.5,1]}),[0,0,90])
-                }
+                // Vehicle identifiers.
                 box([0.012,0.15,0.30],[side*1.541,3.12,5.96],white,0.006)
                 label("2514",0.09,[side*1.554,3.12,5.96],[-90,side*90,0],[0.18,0.24,0.28,1])
                 for(const z of [-8,-4,0,4,8]) box([0.07,0.075,0.13],[side*1.57,0.97,z],white)
@@ -344,7 +326,7 @@ main.moon: |
             return Group(parts)
         produces: MESHES
 main.moon.webp: !!binary |
-    UklGRnYOAABXRUJQVlA4WAoAAAAwAAAA/wAA/wAASUNDUMgBAAAAAAHIAAAAAAQw
+    UklGRnAOAABXRUJQVlA4WAoAAAAwAAAA/wAA/wAASUNDUMgBAAAAAAHIAAAAAAQw
     AABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAA
     AAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAA
@@ -362,63 +344,63 @@ main.moon.webp: !!binary |
     sDFyQ8YeqmZkjFyRsUdqyHhk4F5SukYakPIRqaQ0MvCClC1Qg7qS1BimVWjrBeIq
     8g7SIK5BXVVXkfoRoEFcL+oqkve7NYhrUFfVVYhrEHi7T5VX5FUFr/cp4nqBNOcK
     aW2cofF6Vq9QaWc1/DCNZw068E15htDjlA6lo5PcP7ftVQrwQm6fqhB8I9n39xoU
-    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
-    QDMy8t7/l0AAAAAAAAA=
+    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
+    B4Z4AAAAAAA=
