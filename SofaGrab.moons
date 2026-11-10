@@ -1,0 +1,1026 @@
+# moons v1
+main.moon: |
+    moon: "1.0"
+    doc: |
+        Karup Design "Grab" 3-seater sofa bed in sofa position: clear-lacquered pine frame
+        with a tufted corduroy futon (colour 512 Seaweed). 204 cm wide, 93 cm high, feet
+        90 cm apart front to back, seat about 40 cm high at the tufts.
+        Each side frame is an arm sloping down to the front, a raked front leg, a splayed
+        rear leg and a low rail. The backrest hangs from the arms by two hook pieces: each
+        has a quarter-round nose resting in the arm and a tooth that grabs a tab on top of
+        the rear leg.
+        Meters, Y up, the sofa faces +Z and stands on the floor at Y = 0, centered on X; the
+        feet are centered on Z.
+    params:
+        width:
+            default: 2.04
+            doc: Overall width across both side frames, in meters.
+            category: Size
+            min: 1.4
+            max: 2.4
+            step: 0.01
+        fabric_color:
+            default: [0.042, 0.075, 0.058, 1]
+            doc: Colour of the corduroy cover (512 Seaweed by default).
+            kind: color
+            category: Finish
+        wood_tint:
+            default: [1, 1, 1, 1]
+            doc: Stain on the pine; white is the clear-lacquered finish.
+            kind: color
+            category: Finish
+        tuft_depth:
+            default: 0.035
+            doc: How deep the tufts pull the mattress in, in meters.
+            category: Mattress
+            min: 0
+            max: 0.05
+            step: 0.005
+    assets:
+        # Measurements shared by several parts. Z here is measured from the back of the rear
+        # feet (0) to the front of the front feet (0.90); the render centers it.
+        dims:
+            expression: |
+                const W = params.width
+                const side = 0.05                      // thickness of the side frames
+                const inner = W / 2 - side             // X of their inner faces
+                return {
+                    W, side, inner,
+                    feet: 0.9,
+                    mattress: W - 0.14,                // mattress length between the arms
+                    rail_y: 0.255, rail_h: 0.07,       // long rails and side rails share a height
+                    rail_front: 0.84, rail_rear: 0.212,
+                    slat_top: 0.29,
+                    seat_thickness: 0.16, back_thickness: 0.15,
+                    // Backrest frame: leans back 17°; its origin lies on the plane the
+                    // mattress leans against.
+                    lean: 17,
+                    back_origin: [0, 0.42, 0.1274],
+                    slats: Math.max(3, Math.round((W - 0.29) / 0.125) + 1),
+                    slat_span: W - 0.29,
+                }
+
+        # ── MATERIALS ──
+        pine:
+            use:
+                import: ./parts/pine.moon
+            with:
+                tint:
+                    param: wood_tint
+        corduroy:
+            use:
+                import: ./parts/corduroy.moon
+            with:
+                color:
+                    param: fabric_color
+        black_steel:
+            op: Material
+            with:
+                color: [0.02, 0.02, 0.022, 1]
+                roughness: 0.45
+                metallic: 0.8
+
+        # ── SIDE FRAME PROFILES ── outlines in the side plane as [z, y] points. The frame is
+        # one silhouette cut into boards along its joints, so neighbours share their joint
+        # points exactly: the rail butts into both legs, the arm meets each leg on a line
+        # through the middle of the rounded inside corner, and the hook piece fits the arm
+        # along a quarter circle and the rear leg around its tab.
+        side_shapes:
+            expression: |
+                // Arc that rounds corner P of the path A → P → B with radius r.
+                const fillet = (A, P, B, r, n = 8) => {
+                    let ux = A[0] - P[0], uy = A[1] - P[1], vx = B[0] - P[0], vy = B[1] - P[1]
+                    const lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy)
+                    ux /= lu; uy /= lu; vx /= lv; vy /= lv
+                    const phi = Math.acos(Math.max(-1, Math.min(1, ux * vx + uy * vy)))
+                    const d = r / Math.tan(phi / 2)
+                    let bx = ux + vx, by = uy + vy
+                    const lb = Math.hypot(bx, by)
+                    const cx = P[0] + bx / lb * r / Math.sin(phi / 2), cy = P[1] + by / lb * r / Math.sin(phi / 2)
+                    const a0 = Math.atan2(P[1] + uy * d - cy, P[0] + ux * d - cx)
+                    let da = Math.atan2(P[1] + vy * d - cy, P[0] + vx * d - cx) - a0
+                    while (da > Math.PI) da -= 2 * Math.PI
+                    while (da < -Math.PI) da += 2 * Math.PI
+                    const out = []
+                    for (let k = 0; k <= n; k++) out.push([cx + r * Math.cos(a0 + da * k / n), cy + r * Math.sin(a0 + da * k / n)])
+                    return out
+                }
+
+                // The arm and the hook piece share one top line, sloping down to the front.
+                const top = z => 0.578 - 0.061 * (z - 0.01)
+                const hookHeight = 0.073
+                const hookUnder = z => top(z) - hookHeight
+                const rearFootA = [0, 0], rearFootB = [0.06, 0]
+                const frontFootA = [0.853, 0], frontFootB = [0.9, 0]
+                const frontCorner = [0.842, top(0.842)]        // outer top-front corner
+                const frontInside = [0.772, 0.462]             // inside corner, arm / front leg
+                const rearInside = [0.2842, 0.4504]            // inside corner, arm / rear leg
+                const railLow = 0.22, railHigh = 0.29
+                const rearLegFront = y => rearFootB[0] + (rearInside[0] - rearFootB[0]) * y / rearInside[1]
+                const frontLegInside = y => frontFootA[0] + (frontInside[0] - frontFootA[0]) * y / frontInside[1]
+
+                // Where the back edge of the rear leg reaches the underside of the hook piece.
+                const kneeY = (hookUnder(0)) / (1 + 0.061 * 0.438)
+                const knee = [0.438 * kneeY, kneeY]
+                // The tab on top of the rear leg, and the tooth of the hook piece beside it.
+                const tooth = [0.264, hookUnder(0.264)]
+                const tabLeft = [0.223, 0.526], tabRight = [0.262, 0.526]
+                const tabLeftArc = fillet(knee, tabLeft, tabRight, 0.004, 6)
+                const tabRightArc = fillet(tabLeft, tabRight, tooth, 0.004, 6)
+                // The nose of the hook piece: a quarter circle from the tooth up to the top line.
+                const noseR = 0.075, noseC = [tooth[0], tooth[1] + noseR]
+                let lo = -Math.PI / 2, hi = Math.PI / 2
+                for (let i = 0; i < 40; i++) {
+                    const a = (lo + hi) / 2
+                    if (noseC[1] + noseR * Math.sin(a) < top(noseC[0] + noseR * Math.cos(a))) lo = a; else hi = a
+                }
+                const nose = []
+                for (let k = 0; k <= 12; k++) {
+                    const a = -Math.PI / 2 + (lo + Math.PI / 2) * k / 12
+                    nose.push([noseC[0] + noseR * Math.cos(a), noseC[1] + noseR * Math.sin(a)])
+                }
+                const noseTop = nose[12], noseInner = nose.slice(1, -1)
+
+                const foot = 0.004
+                const rearArc = fillet(rearFootB, rearInside, frontInside, 0.05, 12)   // leg edge → arm underside
+                const frontArc = fillet(rearInside, frontInside, frontFootA, 0.025)    // arm underside → leg edge
+                const cornerArc = fillet(frontFootB, frontCorner, noseTop, 0.035)      // front edge → arm top
+
+                const rear_leg = [
+                    ...fillet(knee, rearFootA, rearFootB, foot, 4),
+                    ...fillet(rearFootA, rearFootB, rearInside, foot, 4),
+                    ...rearArc.slice(0, 7),
+                    tooth,
+                    ...tabRightArc.slice().reverse(),
+                    ...tabLeftArc.slice().reverse(),
+                    knee,
+                ]
+                const arm = [
+                    tooth,
+                    ...rearArc.slice(6),
+                    ...frontArc.slice(0, 5),
+                    ...cornerArc.slice(4),
+                    noseTop,
+                    ...noseInner.slice().reverse(),
+                ]
+                const front_leg = [
+                    ...fillet(frontInside, frontFootA, frontFootB, foot, 4),
+                    ...fillet(frontFootA, frontFootB, frontCorner, foot, 4),
+                    ...cornerArc.slice(0, 5),
+                    ...frontArc.slice(4),
+                ]
+                const rail = [
+                    [rearLegFront(railLow), railLow], [frontLegInside(railLow), railLow],
+                    [frontLegInside(railHigh), railHigh], [rearLegFront(railHigh), railHigh],
+                ]
+                // The hook piece pivots on the backrest stile; its rear end is rounded.
+                const hookRear = 0.0105
+                const rearTop = [hookRear, top(hookRear)], rearUnder = [hookRear, hookUnder(hookRear)]
+                const hook = [
+                    ...fillet(rearTop, rearUnder, knee, 0.034, 10),
+                    knee,
+                    ...tabLeftArc,
+                    ...tabRightArc,
+                    tooth,
+                    ...noseInner,
+                    noseTop,
+                    ...fillet(noseTop, rearTop, rearUnder, 0.034, 10),
+                ]
+                return { rear_leg, arm, front_leg, rail, hook }
+
+        # ── SIDE FRAMES ── boards built at X = 0 … thickness; each has its own grain direction.
+        arm:
+            use:
+                import: ./parts/profile-board.moon
+            with:
+                points:
+                    expression: |
+                        assets.side_shapes.arm
+                grain: -2
+                thickness:
+                    expression: |
+                        assets.dims.side
+                material:
+                    asset: pine
+        front_leg:
+            use:
+                import: ./parts/profile-board.moon
+            with:
+                points:
+                    expression: |
+                        assets.side_shapes.front_leg
+                grain: 98
+                thickness:
+                    expression: |
+                        assets.dims.side
+                material:
+                    asset: pine
+        rear_leg:
+            use:
+                import: ./parts/profile-board.moon
+            with:
+                points:
+                    expression: |
+                        assets.side_shapes.rear_leg
+                grain: 65
+                thickness:
+                    expression: |
+                        assets.dims.side
+                material:
+                    asset: pine
+        side_rail:
+            use:
+                import: ./parts/profile-board.moon
+            with:
+                points:
+                    expression: |
+                        assets.side_shapes.rail
+                grain: 0
+                thickness:
+                    expression: |
+                        assets.dims.side
+                material:
+                    asset: pine
+        hook_piece:
+            use:
+                import: ./parts/profile-board.moon
+            with:
+                points:
+                    expression: |
+                        assets.side_shapes.hook
+                grain: -3.5
+                thickness:
+                    expression: |
+                        assets.dims.side
+                material:
+                    asset: pine
+        # The boards are symmetric across their thickness, so the right frame is the same
+        # set of boards moved over, not a mirror image.
+        side_boards:
+            group:
+              - asset: arm
+              - asset: front_leg
+              - asset: rear_leg
+              - asset: side_rail
+              - asset: hook_piece
+        side_frames:
+            op: Place
+            with:
+                positions:
+                    expression: |
+                        [[-assets.dims.W / 2, 0, 0], [assets.dims.inner, 0, 0]]
+            input:
+                asset: side_boards
+        # Bolt heads on the outer faces: the hook pivot and the two long-rail bolts.
+        bolt_head:
+            pipe:
+              - op: Cylinder
+                with:
+                    height: 0.006
+                    radiusLow: 0.0065
+                    resolution: 24
+              - op: Transform
+                with:
+                    rotate: [0, 0, 90]
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: black_steel
+        side_bolts:
+            op: Place
+            with:
+                positions:
+                    expression: |
+                        const d = assets.dims
+                        const x = d.W / 2 - 0.0015
+                        const spots = [[0.539, 0.042], [d.rail_y - 0.005, d.rail_front], [d.rail_y - 0.005, d.rail_rear]]
+                        return [...spots.map(s => [-x, s[0], s[1]]), ...spots.map(s => [x, s[0], s[1]])]
+            input:
+                asset: bolt_head
+
+        # ── SEAT FRAME ── two long rails between the side frames, a center beam and slats.
+        long_rail:
+            use:
+                import: ./parts/board.moon
+            with:
+                length:
+                    expression: |
+                        assets.dims.inner * 2 + 0.004
+                height:
+                    expression: |
+                        assets.dims.rail_h
+                depth: 0.03
+                material:
+                    asset: pine
+        long_rails:
+            op: Place
+            with:
+                positions:
+                    expression: |
+                        const d = assets.dims
+                        return [[0, d.rail_y, d.rail_front], [0, d.rail_y, d.rail_rear]]
+            input:
+                asset: long_rail
+        # Everything that runs front to back between the long rails shares this length.
+        seat_span:
+            expression: |
+                const d = assets.dims
+                return { length: d.rail_front - d.rail_rear - 0.03 + 0.004, z: (d.rail_front + d.rail_rear) / 2 }
+        center_beam:
+            pipe:
+              - use:
+                    import: ./parts/board.moon
+                with:
+                    length:
+                        expression: |
+                            assets.seat_span.length
+                    height: 0.05
+                    depth: 0.04
+                    material:
+                        asset: pine
+              - op: Transform
+                with:
+                    rotate: [0, 90, 0]
+                    translate:
+                        expression: |
+                            [0, assets.dims.slat_top - 0.015 - 0.025, assets.seat_span.z]
+        slat_positions:
+            doc: |
+                Evenly spaced slat centers across the width, as [x, y, z] points on one line.
+            params:
+                count: 15
+                span: 1.75
+                y: 0
+                z: 0
+            render:
+                expression: |
+                    const n = params.count
+                    const x = (Range({ count: n }) / (n - 1) - 0.5) * params.span
+                    return StackAxis({ input: [x, Fill({ value: params.y, shape: [n] }), Fill({ value: params.z, shape: [n] })], axis: 1 })
+        seat_slats:
+            op: Place
+            with:
+                positions:
+                    use:
+                        asset: slat_positions
+                    with:
+                        count:
+                            expression: |
+                                assets.dims.slats
+                        span:
+                            expression: |
+                                assets.dims.slat_span
+                        y:
+                            expression: |
+                                assets.dims.slat_top - 0.0075
+                        z:
+                            expression: |
+                                assets.seat_span.z
+            input:
+                pipe:
+                  - use:
+                        import: ./parts/board.moon
+                    with:
+                        length:
+                            expression: |
+                                assets.seat_span.length
+                        height: 0.015
+                        depth: 0.06
+                        edge: 0.002
+                        material:
+                            asset: pine
+                  - op: Transform
+                    with:
+                        rotate: [0, 90, 0]
+
+        # ── BACKREST FRAME ── built upright in its own frame (X across, Y up the back, Z = 0
+        # on the plane the mattress leans against), then leaned back as one.
+        stile:
+            pipe:
+              - use:
+                    import: ./parts/board.moon
+                with:
+                    length: 0.6156
+                    height: 0.032
+                    depth: 0.065
+                    material:
+                        asset: pine
+              - op: Transform
+                with:
+                    rotate: [0, 0, 90]
+        stiles:
+            op: Place
+            with:
+                positions:
+                    expression: |
+                        const x = assets.dims.inner - 0.016
+                        return [[-x, 0.1408, -0.0325], [x, 0.1408, -0.0325]]
+            input:
+                asset: stile
+        back_rail:
+            use:
+                import: ./parts/board.moon
+            with:
+                length:
+                    expression: |
+                        assets.dims.inner * 2 - 0.06
+                height: 0.05
+                depth: 0.03
+                material:
+                    asset: pine
+        back_rails:
+            op: Place
+            with:
+                positions: [[0, 0.4186, -0.03], [0, -0.1, -0.03]]
+            input:
+                asset: back_rail
+        back_slats:
+            op: Place
+            with:
+                positions:
+                    use:
+                        asset: slat_positions
+                    with:
+                        count:
+                            expression: |
+                                assets.dims.slats
+                        span:
+                            expression: |
+                                assets.dims.slat_span
+                        y: 0.1553
+                        z: -0.0075
+            input:
+                pipe:
+                  - use:
+                        import: ./parts/board.moon
+                    with:
+                        length: 0.5606
+                        height: 0.06
+                        depth: 0.015
+                        edge: 0.002
+                        material:
+                            asset: pine
+                  - op: Transform
+                    with:
+                        rotate: [0, 0, 90]
+
+        # ── MATTRESS ── one futon folded at the back: a seat fold lying on the slats and a
+        # back fold leaning on the backrest, its lower edge tucked in behind the seat.
+        seat_fold:
+            pipe:
+              - use:
+                    import: ./parts/futon.moon
+                with:
+                    length:
+                        expression: |
+                            assets.dims.mattress
+                    depth: 0.74
+                    thickness:
+                        expression: |
+                            assets.dims.seat_thickness
+                    rows: [-0.1175, 0.2075]
+                    tuft_depth:
+                        param: tuft_depth
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: corduroy
+              - op: Transform
+                with:
+                    translate:
+                        expression: |
+                            [0, assets.dims.slat_top + 0.001 + assets.dims.seat_thickness / 2, 0.53]
+        back_fold:
+            pipe:
+              - use:
+                    import: ./parts/futon.moon
+                with:
+                    length:
+                        expression: |
+                            assets.dims.mattress
+                    depth: 0.535
+                    thickness:
+                        expression: |
+                            assets.dims.back_thickness
+                    rows: [-0.1075, 0.1175]
+                    tuft_depth:
+                        param: tuft_depth
+                    phase: 2.4
+              - op: ApplyMaterial
+                with:
+                    material:
+                        asset: corduroy
+                # Stand it up: its top face turns to the front, its front edge becomes the bottom.
+              - op: Transform
+                with:
+                    rotate: [90, 0, 0]
+                    translate:
+                        expression: |
+                            [0, 0.2351, assets.dims.back_thickness / 2 - 0.003]
+        backrest:
+            pipe:
+              - group:
+                  - asset: stiles
+                  - asset: back_rails
+                  - asset: back_slats
+                  - asset: back_fold
+              - op: Transform
+                with:
+                    rotate:
+                        expression: |
+                            [-assets.dims.lean, 0, 0]
+                    translate:
+                        expression: |
+                            assets.dims.back_origin
+
+    render:
+        pipe:
+          - group:
+              - asset: side_frames
+              - asset: side_bolts
+              - asset: long_rails
+              - asset: center_beam
+              - asset: seat_slats
+              - asset: backrest
+              - asset: seat_fold
+            # Center the feet on Z: it was measured from the back of the rear feet.
+          - op: Transform
+            with:
+                translate:
+                    expression: |
+                        [0, 0, -assets.dims.feet / 2]
+parts/board.moon: |
+    moon: "1.0"
+    doc: |
+        A straight planed board with eased edges, centered on the origin with its length
+        along X so the wood grain follows it. Pose it afterwards with one Transform.
+    params:
+        length:
+            default: 1
+            doc: Length along X, in meters.
+        height:
+            default: 0.06
+            doc: Size along Y, in meters.
+        depth:
+            default: 0.03
+            doc: Size along Z, in meters.
+        edge:
+            default: 0.003
+            doc: Radius of the eased edges, in meters.
+        material:
+            default:
+                op: Material
+                with:
+                    color: [0.78, 0.6, 0.35, 1]
+            doc: Wood material; its texture is tiled along the board.
+    render:
+        pipe:
+          - op: RoundedBox
+            with:
+                size:
+                    expression: |
+                        [params.length, params.height, params.depth]
+                radius:
+                    param: edge
+          - op: ApplyMaterial
+            with:
+                material:
+                    param: material
+          - op: TileMaterial
+parts/corduroy.moon: |
+    moon: "1.0"
+    doc: |
+        Wide-wale corduroy as a MATERIAL: a tileable color texture and normal map of
+        rounded ribs. The ribs are lines of constant U, so they run along the V direction
+        of whatever mesh carries the material.
+    params:
+        color:
+            default: [0.042, 0.075, 0.058, 1]
+            doc: Fabric color on the rib crests (linear RGBA).
+            kind: color
+        ribs:
+            default: 8
+            doc: Ribs across one texture tile.
+        pixels:
+            default: 256
+            doc: Texture resolution, in pixels per side.
+        relief:
+            default: 0.4
+            doc: Strength of the rib normal map; 0 is flat.
+    assets:
+        # Rib height 0..1 across U (flat crest, narrow groove) and its slope, shared by both maps.
+        ribs_field:
+            expression: |
+                const n = params.pixels
+                const [xi, yi] = Coords({ shape: [n, n] })
+                const phase = xi / n * params.ribs * Math.PI
+                const c = Cos(phase), s = Sin(phase)
+                return { height: 1 - c ** 4, slope: c ** 3 * s * 4, v: yi / n, u: xi / n }
+        color_map:
+            expression: |
+                const n = params.pixels, tau = 2 * Math.PI
+                const f = assets.ribs_field
+                // Short pile catching the light unevenly along each rib.
+                const pile = Sin((f.v * 61 + f.u * 3) * tau) * Sin((f.v * 37 - f.u * 5) * tau + 1) * 0.07
+                const shade = Reshape({ input: f.height * 0.62 + 0.38 + pile, newShape: [n, n, 1] })
+                const rgb = Data([params.color[0], params.color[1], params.color[2]])
+                return Image({ input: shade * rgb, transfer: "srgb" })
+            produces: IMAGE
+        normal_map:
+            expression: |
+                const n = params.pixels
+                const nx = assets.ribs_field.slope * -params.relief
+                const len = Sqrt(nx * nx + 1)
+                const half = Fill({ value: 0.5, shape: [n, n] })
+                return Image(StackAxis({ input: [nx / len * 0.5 + 0.5, half, 1 / len * 0.5 + 0.5], axis: 2 }))
+            produces: IMAGE
+    render:
+        op: Material
+        with:
+            color:
+                asset: color_map
+            normal:
+                asset: normal_map
+            roughnessFactor: 0.95
+            sheenColorFactor:
+                expression: |
+                    [params.color[0] * 2.5 + 0.03, params.color[1] * 2.5 + 0.03, params.color[2] * 2.5 + 0.03]
+            sheenRoughnessFactor: 0.55
+parts/futon.moon: |
+    moon: "1.0"
+    doc: |
+        One fold of a tufted futon mattress, as a mesh computed from data. It lies flat,
+        centered on the origin: length along X, thickness along Y, depth along Z.
+        A rounded-rectangle cross-section is swept along X and closed at both ends;
+        tufts pull the top and bottom in at a grid of points, with soft creases between
+        them. UVs run U along the length and V around the cross-section, both in fabric
+        tiles, so a ribbed fabric shows its ribs running front to back.
+    params:
+        length:
+            default: 1.9
+            doc: Size along X, in meters.
+        depth:
+            default: 0.69
+            doc: Size along Z, in meters.
+        thickness:
+            default: 0.16
+            doc: Thickness of the puffed filling along Y, in meters.
+        columns:
+            default: 6
+            doc: Tufts along the length, evenly spaced.
+        rows:
+            default: [-0.14, 0.185]
+            doc: Z position of each row of tufts, in meters from the center.
+        tuft_depth:
+            default: 0.035
+            doc: How far a tuft pulls the surface in, in meters.
+        tuft_radius:
+            default: 0.05
+            doc: Radius of the dimple around a tuft, in meters.
+        underside:
+            default: 0.25
+            doc: Strength of the tufting on the underside, which is pressed flat, from 0 to 1.
+        roundness:
+            default: 0.8
+            doc: Radius of the long edges as a fraction of half the thickness.
+        end_radius:
+            default: 0.07
+            doc: How far from each end the mattress starts to round off, in meters.
+        corner_radius:
+            default: 0.05
+            doc: Rounding of the four corners seen from above, in meters.
+        grid:
+            default: 0.012
+            doc: Spacing of the mesh vertices, in meters.
+        fabric_tile:
+            default: 0.056
+            doc: Edge length of one fabric texture tile, in meters (8 ribs of 7 mm).
+        phase:
+            default: 0
+            doc: Shifts the slight unevenness of the surface, so two folds differ.
+    render:
+        expression: |
+            const L = params.length, T = params.thickness
+            const a = params.depth / 2, b = T / 2
+            const r = b * params.roundness, step = params.grid
+
+            // Cross-section: [z, y, nz, ny] at even arc length, from the bottom center toward
+            // the front (+Z), up the front edge, back over the top and down the rear edge.
+            const loop = []
+            const line = (z0, y0, z1, y1, nz, ny) => {
+                const m = Math.max(1, Math.round(Math.hypot(z1 - z0, y1 - y0) / step))
+                for (let i = 0; i < m; i++) {
+                    const t = i / m
+                    loop.push([z0 + (z1 - z0) * t, y0 + (y1 - y0) * t, nz, ny])
+                }
+            }
+            const arc = (cz, cy, a0) => {
+                const m = Math.max(4, Math.round(Math.PI / 2 * r / (step * 0.6)))
+                for (let i = 0; i < m; i++) {
+                    const t = a0 + Math.PI / 2 * i / m
+                    loop.push([cz + r * Math.cos(t), cy + r * Math.sin(t), Math.cos(t), Math.sin(t)])
+                }
+            }
+            line(0, -b, a - r, -b, 0, -1)
+            arc(a - r, -b + r, -Math.PI / 2)
+            line(a, -b + r, a, b - r, 1, 0)
+            arc(a - r, b - r, 0)
+            line(a - r, b, r - a, b, 0, 1)
+            arc(r - a, b - r, Math.PI / 2)
+            line(-a, b - r, -a, r - b, -1, 0)
+            arc(r - a, r - b, Math.PI)
+            line(r - a, -b, 0, -b, 0, -1)
+            loop.push([0, -b, 0, -1])       // the seam, under the mattress: same point, its own V
+            const K = loop.length
+            const arcLength = [0]
+            for (let k = 1; k < K; k++) {
+                arcLength.push(arcLength[k - 1] + Math.hypot(loop[k][0] - loop[k - 1][0], loop[k][1] - loop[k - 1][1]))
+            }
+
+            // Stations along X: [x, thickness scale, depth scale]. Each end closes on a
+            // quarter ellipse, sampled by angle so the round end stays smooth.
+            const re = Math.min(params.end_radius, L / 2), half = L / 2 - re
+            const shrink = params.corner_radius / a
+            const stations = []
+            const ends = 10
+            for (let i = 0; i <= ends; i++) {
+                const p = (1 - i / ends) * Math.PI / 2
+                stations.push([-half - re * Math.sin(p), Math.cos(p), 1 - shrink * (1 - Math.cos(p))])
+            }
+            const mid = Math.max(2, Math.round(2 * half / step))
+            for (let i = 1; i < mid; i++) stations.push([-half + 2 * half * i / mid, 1, 1])
+            for (let i = 0; i <= ends; i++) {
+                const p = i / ends * Math.PI / 2
+                stations.push([half + re * Math.sin(p), Math.cos(p), 1 - shrink * (1 - Math.cos(p))])
+            }
+            const N = stations.length
+
+            // Tufting: a deep dimple at each tuft, shallow creases along the lines between them.
+            const pitch = L / params.columns
+            const rowZ = []
+            for (let i = 0; i < params.rows.length; i++) rowZ.push(params.rows[i])
+            const sigma = params.tuft_radius, sigmaCrease = sigma * 0.5
+            const deep = params.tuft_depth, crease = deep * 0.42
+            const dip = (x, z) => {
+                const dx = Math.abs((((x + L / 2) / pitch) % 1 + 1) % 1 - 0.5) * pitch
+                let dz = 1e9
+                for (const zr of rowZ) dz = Math.min(dz, Math.abs(z - zr))
+                const alongColumn = Math.exp(-((dx / sigmaCrease) ** 2)) * (0.4 + 0.6 * Math.exp(-((dz / 0.12) ** 2)))
+                const alongRow = Math.exp(-((dz / sigmaCrease) ** 2)) * (0.4 + 0.6 * Math.exp(-((dx / 0.12) ** 2)))
+                return crease * Math.max(alongColumn, alongRow)
+                    + (deep - crease) * Math.exp(-(dx * dx + dz * dz) / (sigma * sigma))
+            }
+            const ph = params.phase
+            const uneven = (x, z) => 0.004 * Math.sin(5.1 * x + ph) * Math.sin(6.3 * z + 2 * ph)
+                + 0.0025 * Math.sin(11.7 * x + 3.1 * z + 1.7 * ph)
+
+            const vertices = [], uvs = []
+            for (let i = 0; i < N; i++) {
+                const [x, e, sz] = stations[i]
+                for (let k = 0; k < K; k++) {
+                    const [z0, y0, nz, ny] = loop[k]
+                    const flat = Math.abs(ny) ** 1.5
+                    // The underside lies flat on the slats: the unevenness fades out toward it.
+                    const pull = ny < 0 ? params.underside : 1
+                    const d = (dip(x, z0) * flat * pull - uneven(x, z0) * (1 + ny) / 2) * e
+                    vertices.push([x, y0 * e - ny * d, z0 * sz - nz * d])
+                    uvs.push([x / params.fabric_tile, arcLength[k] / params.fabric_tile])
+                }
+            }
+
+            // Normals from central differences, wrapping around the cross-section so the seam
+            // shades smoothly; the collapsed tip of each end points straight out.
+            const normals = []
+            for (let i = 0; i < N; i++) {
+                const i0 = Math.max(i - 1, 0), i1 = Math.min(i + 1, N - 1)
+                for (let k = 0; k < K; k++) {
+                    const k0 = k === 0 ? K - 2 : k - 1, k1 = k === K - 1 ? 1 : k + 1
+                    const p = vertices[i1 * K + k], q = vertices[i0 * K + k]
+                    const s = vertices[i * K + k1], t = vertices[i * K + k0]
+                    const ax = p[0] - q[0], ay = p[1] - q[1], az = p[2] - q[2]
+                    const bx = s[0] - t[0], by = s[1] - t[1], bz = s[2] - t[2]
+                    const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx
+                    const len = Math.hypot(nx, ny, nz)
+                    normals.push(len > 1e-9 ? [nx / len, ny / len, nz / len] : [i < N / 2 ? -1 : 1, 0, 0])
+                }
+            }
+
+            // Two triangles per grid cell; where an end collapses to a line some would have
+            // no area, and those are left out.
+            const same = (p, q) => Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) + Math.abs(p[2] - q[2]) < 1e-9
+            const triangles = []
+            const add = (i, j, k) => {
+                const p = vertices[i], q = vertices[j], s = vertices[k]
+                if (!same(p, q) && !same(q, s) && !same(s, p)) triangles.push([i, j, k])
+            }
+            for (let i = 0; i < N - 1; i++) {
+                for (let k = 0; k < K - 1; k++) {
+                    const v00 = i * K + k, v01 = v00 + 1, v10 = v00 + K, v11 = v10 + 1
+                    add(v00, v10, v01)
+                    add(v10, v11, v01)
+                }
+            }
+            return Mesh({ vertices, triangles, normals, materialUVs: uvs })
+        produces: MESHES
+parts/pine.moon: |
+    moon: "1.0"
+    doc: |
+        Clear-lacquered pine as a MATERIAL. The grain texture is procedural and tileable
+        (every frequency is a whole number of periods per tile). Its lines run along
+        texture U, so a board built with its length on X and finished with TileMaterial
+        gets grain along its length.
+    params:
+        tint:
+            default: [1, 1, 1, 1]
+            doc: Stain multiplied onto the pine texture (linear RGBA); white leaves it natural.
+            kind: color
+        pixels:
+            default: 512
+            doc: Texture resolution, in pixels per side.
+        tile:
+            default: 0.6
+            doc: Edge length of one texture tile on the wood, in meters.
+    assets:
+        grain:
+            expression: |
+                const n = params.pixels, tau = 2 * Math.PI
+                const [xi, yi] = Coords({ shape: [n, n] })
+                const u = xi / n, v = yi / n
+                // Growth rings: straight lines across V, bent by slow waves into cathedral grain.
+                const warp = Sin((u + v * 2) * tau + 0.6) * 0.9
+                    + Sin((u * 2 - v * 3) * tau + 2.1) * 0.5
+                    + Sin((u * 3 + v * 5) * tau + 4.0) * 0.28
+                    + Sin((u - v * 7) * tau + 1.3) * 0.22
+                const late = ((Sin((v * 64 + warp) * tau) + 1) / 2) ** 4
+                // Fine fibres and a broad drift in tone.
+                const fibre = Sin((v * 173 + u * 2) * tau + Sin((u * 5 + v * 11) * tau) * 1.5) * 0.5
+                    + Sin((v * 97 - u * 3) * tau + 0.7) * 0.5
+                const drift = Sin((u + v) * tau + 3.3) * 0.5 + Sin((u * 2 - v) * tau + 5.0) * 0.5
+                const t = Clamp({ input: late * 0.5 + fibre * 0.06 + drift * 0.06 + 0.08, min: 0, max: 1 })
+                const early = Data([0.86, 0.73, 0.54])
+                const latewood = Data([0.68, 0.5, 0.29])
+                const field = Mix({ input: early, target: latewood, t: Reshape({ input: t, newShape: [n, n, 1] }) })
+                return Image({ input: field, transfer: "srgb" })
+            produces: IMAGE
+    render:
+        op: Material
+        with:
+            color:
+                asset: grain
+            textureSizeInMeters:
+                param: tile
+            colorFactor:
+                param: tint
+            roughnessFactor: 0.42
+            clearcoatFactor: 0.2
+            clearcoatRoughnessFactor: 0.3
+parts/profile-board.moon: |
+    moon: "1.0"
+    doc: |
+        A board sawn to a 2D profile. The profile is given in the side plane of the sofa
+        as [z, y] points (counter-clockwise). The result stands in that plane: thickness
+        from X = 0 to X = thickness, profile Y up and profile Z toward the front.
+        The board is extruded lying down with its grain direction on X, textured, and
+        only then stood up, so the grain follows `grain` whatever the profile's angle.
+    params:
+        points:
+            default: [[0, 0], [0.3, 0], [0.3, 0.05], [0, 0.05]]
+            doc: Outline as [z, y] points in meters, counter-clockwise.
+        grain:
+            default: 0
+            doc: Direction of the wood grain in the side plane, degrees from +Z toward +Y.
+        thickness:
+            default: 0.045
+            doc: Board thickness along X, in meters.
+        edge:
+            default: 0.002
+            doc: Width of the bevel on every sharp edge, in meters.
+        material:
+            default:
+                op: Material
+                with:
+                    color: [0.78, 0.6, 0.35, 1]
+            doc: Wood material; its texture is tiled along the grain.
+    render:
+        pipe:
+          - op: Polygon
+            with:
+                points:
+                    expression: |
+                        const a = -params.grain * Math.PI / 180, c = Math.cos(a), s = Math.sin(a)
+                        return params.points.map(p => [p[0] * c - p[1] * s, p[0] * s + p[1] * c])
+          - op: Extrude
+            with:
+                height:
+                    param: thickness
+          - op: Chamfer
+            with:
+                distance:
+                    param: edge
+            # Shade the rounded corners smoothly; the bevels (45°) stay crisp.
+          - op: Smooth
+            with:
+                subdivisions: 0
+                minSharpAngle: 30
+          - op: ApplyMaterial
+            with:
+                material:
+                    param: material
+          - op: TileMaterial
+            # Turn the grain back to its real direction (about the extrusion axis) …
+          - op: Transform
+            with:
+                rotate:
+                    expression: |
+                        [0, -params.grain, 0]
+            # … then stand the profile up: extruded (z, thickness, y) becomes (thickness, y, z).
+          - op: Transform
+            with:
+                rotate: [-90, -90, 0]
+main.moon.webp: !!binary |
+    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
